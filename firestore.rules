@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'admin' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    // User profile documents
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+
+      // Subcollections
+      match /watchlist/{itemId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      match /searchAlerts/{alertId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // Announcements / broadcasts
+    match /announcements/{announcementId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+  }
+}

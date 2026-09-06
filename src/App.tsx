@@ -1,8 +1,14 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { AuctionListing, AuctionCluster, SearchReference } from "./types";
+import { AuctionListing, AuctionCluster, SearchReference, WatchlistItem } from "./types";
 import { clusterListings } from "./utils/distance";
 import AuctionMap from "./components/AuctionMap";
 import AuctionList from "./components/AuctionList";
+import { useAuth } from "./context/AuthContext";
+import AuthModal from "./components/AuthModal";
+import UserProfileModal from "./components/UserProfileModal";
+import WatchlistModal from "./components/WatchlistModal";
+import SearchAlertsModal from "./components/SearchAlertsModal";
+import AdminPanelModal from "./components/AdminPanelModal";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Search, 
@@ -18,10 +24,46 @@ import {
   ExternalLink,
   ChevronRight,
   Hammer,
-  AlertTriangle
+  AlertTriangle,
+  Bell,
+  Star,
+  Crown,
+  ShieldCheck,
+  User,
+  LogIn,
+  LogOut,
+  Compass,
+  Megaphone,
+  X
 } from "lucide-react";
 
 export default function App() {
+  // Authentication and Membership state
+  const { 
+    currentUser, 
+    userProfile, 
+    role, 
+    isPro, 
+    isAdmin, 
+    watchlist, 
+    searchAlerts, 
+    announcements, 
+    signOutUser 
+  } = useAuth();
+
+  // Modal dialog states
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalTab, setAuthModalTab] = useState<"signin" | "signup" | "demo">("signin");
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isWatchlistOpen, setIsWatchlistOpen] = useState(false);
+  const [isAlertsOpen, setIsAlertsOpen] = useState(false);
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+  const [dismissedAnnouncements, setDismissedAnnouncements] = useState<string[]>([]);
+
+  // Cluster radius (Standard is locked to 50; Pro/Admin can select 50, 100, 150, 250 miles)
+  const [customRadius, setCustomRadius] = useState<number>(50);
+  const effectiveRadius = isPro ? customRadius : 50;
+
   // Query state
   const [keyword, setKeyword] = useState("");
   const [activeSearchTerm, setActiveSearchTerm] = useState("");
@@ -47,7 +89,7 @@ export default function App() {
 
   // Loaded listings state
   const [listings, setListings] = useState<AuctionListing[]>([]);
-  const [searchBreakdown, setSearchBreakdown] = useState<{ easyLiveAuction?: number; bpiAuctions?: number; bidspotterUk?: number } | null>(null);
+  const [searchBreakdown, setSearchBreakdown] = useState<{ easyLiveAuction?: number; bpiAuctions?: number; atgNetwork?: number } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [scrapeStep, setScrapeStep] = useState("");
   const [scrapeError, setScrapeError] = useState<string | null>(null);
@@ -127,18 +169,18 @@ export default function App() {
         matchesSource = itemId.startsWith("easylive") || itemAuctioneer.includes("easy live");
       } else if (selectedSource === "BPI") {
         matchesSource = itemId.startsWith("bpilot") || itemAuctioneer.includes("bpi");
-      } else if (selectedSource === "BidSpotter") {
-        matchesSource = itemId.startsWith("bs-") || itemAuctioneer.includes("bidspotter");
+      } else if (selectedSource === "ATG") {
+        matchesSource = itemId.startsWith("atg-") || itemAuctioneer.includes("bidspotter") || itemAuctioneer.includes("saleroom") || itemAuctioneer.includes("i-bidder");
       }
 
       return matchesKeyword && matchesCategory && matchesDate && matchesCountry && matchesSource;
     });
   }, [listings, activeSearchTerm, selectedCategory, selectedCountry, selectedSource, queryTime, biddingDeadline]);
 
-  // Compute 50-mile clusters dynamically from the filtered listings
+  // Compute regional clusters dynamically from filtered listings based on membership radius
   const computedClusters = useMemo(() => {
-    return clusterListings(filteredListings, 50);
-  }, [filteredListings]);
+    return clusterListings(filteredListings, effectiveRadius);
+  }, [filteredListings, effectiveRadius]);
 
   // Sync selected cluster if filtered listings change
   useEffect(() => {
@@ -153,11 +195,11 @@ export default function App() {
     }
   }, [computedClusters]);
 
-  // Filter listings further to the selected 50-mile map cluster if clicked
+  // Filter listings further to the selected regional map cluster if clicked
   const finalDisplayListings = useMemo(() => {
     if (!selectedCluster) return filteredListings;
     
-    // Find all listings within 50 miles of this cluster's representative coordinate
+    // Find all listings within this cluster's representative radius
     return filteredListings.filter((item) => {
       return selectedCluster.listings.some((cItem) => cItem.id === item.id);
     });
@@ -180,7 +222,7 @@ export default function App() {
     const steps = [
       "Connecting to Easy Live Auction Algolia Search API (130k+ lots)...",
       "Querying BPI Auctions via Artisio REST API with compliant headers...",
-      "Executing BidSpotter UK live lot crawler...",
+      "Executing ATG Media Network crawler (BidSpotter, The Saleroom, i-bidder)...",
       "Extracting physical asset locations and geocoding coordinates across UK regions...",
       "Aggregating real lots and calculating bidding deadlines..."
     ];
@@ -231,7 +273,7 @@ export default function App() {
     }
   };
 
-  // Locate listing on map by selecting its containing 50-mile cluster
+  // Locate listing on map by selecting its containing cluster
   const handleViewOnMap = (listing: AuctionListing) => {
     // Find the cluster that contains this listing
     const cluster = computedClusters.find((c) => 
@@ -242,17 +284,54 @@ export default function App() {
     }
   };
 
+  // Focus and locate an item saved in Watchlist on the live map
+  const handleLocateWatchlistItem = (item: WatchlistItem) => {
+    const cluster = computedClusters.find((c) => 
+      c.listings.some((l) => l.id === item.lotId)
+    );
+    if (cluster) {
+      setSelectedCluster(cluster);
+    } else {
+      // Clear filters so the lot is visible
+      setSelectedCountry("All");
+      setSelectedCategory("All");
+      setActiveSearchTerm("");
+      const target = listings.find((l) => l.id === item.lotId);
+      if (target) {
+        setTimeout(() => {
+          const cl = clusterListings([target], effectiveRadius)[0];
+          if (cl) setSelectedCluster(cl);
+        }, 50);
+      }
+    }
+  };
+
+  // Fast trigger automated scrape from Search Alert
+  const handleExecuteSearchAlert = (term: string, cat: string) => {
+    setKeyword(term);
+    setActiveSearchTerm(term);
+    if (cat && cat !== "All") {
+      setSelectedCategory(cat);
+    }
+    handleScrape(term);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900 selection:bg-blue-100 selection:text-blue-900">
       {/* Brand Header */}
-      <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 z-20 sticky top-0 shadow-xs">
-        <div className="flex items-center gap-3">
-          <div className="bg-blue-600 p-2 rounded-md">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
+      <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-6 shrink-0 z-20 sticky top-0 shadow-xs gap-4">
+        <div className="flex items-center gap-2.5 shrink-0">
+          <div className="bg-blue-600 p-2 rounded-lg shadow-xs">
+            <Hammer className="w-5 h-5 text-white" />
           </div>
-          <h1 className="text-xl font-bold tracking-tight text-slate-800">HAMMER<span className="text-blue-600">POINT</span></h1>
+          <div>
+            <h1 className="text-lg sm:text-xl font-black tracking-tight text-slate-900 leading-none">
+              HAMMER<span className="text-blue-600">POINT</span>
+            </h1>
+            <span className="text-[10px] text-slate-400 font-mono tracking-wider uppercase font-semibold hidden md:inline">
+              Auction Intelligence
+            </span>
+          </div>
         </div>
 
         {/* Search Bar / Trigger Web Scraper */}
@@ -261,7 +340,7 @@ export default function App() {
             e.preventDefault();
             handleScrape(keyword);
           }} 
-          className="flex-1 max-w-2xl mx-12 flex gap-2"
+          className="flex-1 max-w-xl mx-2 sm:mx-6 flex gap-2"
         >
           <div className="relative flex-1">
             <input 
@@ -269,28 +348,149 @@ export default function App() {
               placeholder="Search machinery, fleet, restaurant, tech lots..." 
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
-              className="w-full bg-slate-100 border border-slate-300 rounded-md py-2 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-slate-100 border border-slate-300 rounded-xl py-2 pl-9 pr-3 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
             />
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
           </div>
           <button 
             type="submit"
             disabled={isLoading || !keyword.trim()}
-            className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 transition-colors shrink-0 cursor-pointer"
+            className="bg-blue-600 text-white px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 transition-colors shrink-0 cursor-pointer shadow-xs"
           >
             Scrape Web
           </button>
         </form>
 
-        {/* Global Reference Info */}
-        <div className="hidden lg:flex items-center gap-3">
-          <div className="text-right">
-            <p className="text-xs text-slate-500 font-medium">Active Monitors</p>
-            <p className="text-sm font-bold text-slate-800">{listings.length} Listings</p>
-          </div>
-          <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 border border-blue-200 flex items-center justify-center font-bold text-xs">HP</div>
+        {/* Right Actions & Role-Based Navigation */}
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+          {/* Search Alerts Button */}
+          <button
+            onClick={() => setIsAlertsOpen(true)}
+            className="relative p-2 rounded-xl text-slate-600 hover:text-blue-600 hover:bg-slate-100 transition-colors cursor-pointer"
+            title="Manage Search Alerts & Monitoring"
+          >
+            <Bell className="w-4 h-4" />
+            {searchAlerts.length > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 bg-blue-600 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                {searchAlerts.length}
+              </span>
+            )}
+          </button>
+
+          {/* Watchlist Button */}
+          <button
+            onClick={() => setIsWatchlistOpen(true)}
+            className="relative p-2 sm:px-3 sm:py-1.5 rounded-xl text-slate-700 hover:text-amber-700 hover:bg-amber-50/60 border border-transparent hover:border-amber-200 transition-all cursor-pointer flex items-center gap-1.5"
+            title="Saved Lots Watchlist"
+          >
+            <Star className={`w-4 h-4 ${watchlist.length > 0 ? "fill-amber-400 text-amber-500" : "text-slate-500"}`} />
+            <span className="hidden md:inline text-xs font-bold">Watchlist</span>
+            {watchlist.length > 0 && (
+              <span className="bg-amber-100 text-amber-900 text-[10px] font-bold px-1.5 py-0.2 rounded-full">
+                {watchlist.length}
+              </span>
+            )}
+          </button>
+
+          {/* Admin Console Shortcut Button (visible to Admin role) */}
+          {isAdmin && (
+            <button
+              onClick={() => setIsAdminPanelOpen(true)}
+              className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 text-xs font-bold transition-colors cursor-pointer"
+              title="Open Admin Dashboard & User Management"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Admin Console</span>
+            </button>
+          )}
+
+          {/* User Account / Membership Badge */}
+          {currentUser || userProfile ? (
+            <button
+              onClick={() => setIsProfileModalOpen(true)}
+              className="flex items-center gap-2 pl-2 pr-3 py-1 rounded-xl bg-slate-100 hover:bg-slate-200/80 transition-colors cursor-pointer border border-slate-200 shadow-2xs"
+              title="Click to manage profile, membership tier, or sign out"
+            >
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white shadow-2xs ${
+                isAdmin 
+                  ? "bg-indigo-600" 
+                  : isPro 
+                    ? "bg-purple-600" 
+                    : "bg-blue-600"
+              }`}>
+                {isAdmin ? "👑" : isPro ? "⭐" : "HP"}
+              </div>
+              <div className="text-left hidden sm:block">
+                <div className="text-xs font-bold text-slate-900 leading-tight truncate max-w-[100px]">
+                  {userProfile?.displayName || "Member"}
+                </div>
+                <div className={`text-[9px] font-bold uppercase tracking-wider leading-none mt-0.5 ${
+                  isAdmin 
+                    ? "text-indigo-600" 
+                    : isPro 
+                      ? "text-purple-600" 
+                      : "text-slate-500"
+                }`}>
+                  {isAdmin ? "Admin" : isPro ? "Pro Buyer" : "Standard"}
+                </div>
+              </div>
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => {
+                  setAuthModalTab("signin");
+                  setIsAuthModalOpen(true);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors shadow-xs flex items-center gap-1 cursor-pointer"
+              >
+                <LogIn className="w-3.5 h-3.5" /> Sign In
+              </button>
+
+              <button
+                onClick={() => {
+                  setAuthModalTab("demo");
+                  setIsAuthModalOpen(true);
+                }}
+                className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 text-xs font-bold transition-colors cursor-pointer"
+                title="Explore instantly with 1-click Demo Personas"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-600" /> Demo
+              </button>
+            </div>
+          )}
         </div>
       </header>
+
+      {/* Live Platform Announcement Banner */}
+      {announcements.filter(a => a.active && !dismissedAnnouncements.includes(a.id)).map((ann) => (
+        <div
+          key={ann.id}
+          className={`px-6 py-2 flex items-center justify-between text-xs font-medium border-b shrink-0 ${
+            ann.type === "warning"
+              ? "bg-amber-500 text-slate-950 border-amber-600 font-semibold"
+              : ann.type === "success"
+                ? "bg-emerald-700 text-white border-emerald-800"
+                : "bg-indigo-900 text-white border-indigo-950"
+          }`}
+        >
+          <div className="flex items-center gap-2 max-w-5xl truncate">
+            <Megaphone className="w-4 h-4 shrink-0 text-white animate-pulse" />
+            <span className="font-bold uppercase tracking-wider text-[9px] bg-black/25 px-1.5 py-0.5 rounded text-white">
+              {ann.type}
+            </span>
+            <span className="font-bold">{ann.title}:</span>
+            <span className="opacity-95 truncate">{ann.content}</span>
+          </div>
+          <button
+            onClick={() => setDismissedAnnouncements(prev => [...prev, ann.id])}
+            className="ml-4 opacity-75 hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-black/10 cursor-pointer"
+            title="Dismiss notification"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      ))}
 
       {/* Main Grid Workspace */}
       <main className="flex-1 max-w-[1700px] w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 overflow-hidden">
@@ -355,7 +555,7 @@ export default function App() {
                   { id: "All", label: "All APIs", icon: "⚡" },
                   { id: "EasyLive", label: "Easy Live", icon: "🟢" },
                   { id: "BPI", label: "BPI / Artisio", icon: "🔵" },
-                  { id: "BidSpotter", label: "BidSpotter", icon: "🟣" }
+                  { id: "ATG", label: "ATG Network", icon: "🟣" }
                 ].map((src) => (
                   <button
                     key={src.id}
@@ -419,6 +619,61 @@ export default function App() {
                     {cat}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* Regional Clustering Radius (Role-Based Scope) */}
+            <div className="space-y-1.5 pt-2 border-t border-slate-100">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 font-mono">
+                  <Compass className="w-3.5 h-3.5 text-blue-600" /> Regional Cluster Radius
+                </span>
+                {!isPro && (
+                  <button
+                    onClick={() => {
+                      setAuthModalTab("demo");
+                      setIsAuthModalOpen(true);
+                    }}
+                    className="text-[10px] text-purple-600 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                  >
+                    <Crown className="w-3 h-3 text-amber-500" /> Unlock 100-250 mi
+                  </button>
+                )}
+                {isPro && (
+                  <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
+                    ⭐ Pro Unlocked ({effectiveRadius} mi)
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2 pt-0.5 font-sans">
+                {[50, 100, 150, 250].map((rad) => {
+                  const isAvailable = isPro || rad === 50;
+                  const isSelected = effectiveRadius === rad;
+                  return (
+                    <button
+                      key={rad}
+                      onClick={() => {
+                        if (!isAvailable) {
+                          setAuthModalTab("demo");
+                          setIsAuthModalOpen(true);
+                          return;
+                        }
+                        setCustomRadius(rad);
+                        setSelectedCluster(null);
+                      }}
+                      className={`flex-1 py-1.5 px-2 rounded text-xs font-bold transition-all text-center ${
+                        isSelected
+                          ? "bg-slate-900 text-white shadow-xs"
+                          : isAvailable
+                            ? "bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-800 cursor-pointer"
+                            : "bg-slate-50 text-slate-400 cursor-pointer border border-dashed border-slate-200 hover:bg-purple-50 hover:text-purple-600"
+                      }`}
+                      title={!isAvailable ? "Click to unlock Pro Membership" : `${rad} miles radius clustering`}
+                    >
+                      {rad} mi {!isAvailable && "🔒"}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -503,7 +758,7 @@ export default function App() {
                     BPI / Artisio: {searchBreakdown.bpiAuctions ?? 0} lots
                   </span>
                   <span className="bg-purple-950 text-purple-300 border border-purple-800 px-2 py-0.5 rounded">
-                    BidSpotter: {searchBreakdown.bidspotterUk ?? 0} lots
+                    ATG Network: {searchBreakdown.atgNetwork ?? 0} lots
                   </span>
                 </div>
               )}
@@ -576,6 +831,40 @@ export default function App() {
           </AnimatePresence>
         </div>
       </main>
+
+      {/* Role-Based Membership & Authentication Modals */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        defaultTab={authModalTab}
+      />
+
+      <UserProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        onOpenAdminPanel={() => setIsAdminPanelOpen(true)}
+      />
+
+      <WatchlistModal
+        isOpen={isWatchlistOpen}
+        onClose={() => setIsWatchlistOpen(false)}
+        onLocateListing={handleLocateWatchlistItem}
+        onOpenUpgrade={() => {
+          setAuthModalTab("signup");
+          setIsAuthModalOpen(true);
+        }}
+      />
+
+      <SearchAlertsModal
+        isOpen={isAlertsOpen}
+        onClose={() => setIsAlertsOpen(false)}
+        onExecuteSearch={handleExecuteSearchAlert}
+      />
+
+      <AdminPanelModal
+        isOpen={isAdminPanelOpen}
+        onClose={() => setIsAdminPanelOpen(false)}
+      />
     </div>
   );
 }

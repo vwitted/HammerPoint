@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { AuctionListing, AuctionCluster } from "../types";
+import { useAuth } from "../context/AuthContext";
 import { 
   Calendar, 
   MapPin, 
@@ -10,7 +11,8 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
-  MapIcon
+  MapIcon,
+  Star
 } from "lucide-react";
 
 interface AuctionListProps {
@@ -24,8 +26,25 @@ interface AuctionListProps {
 }
 
 // Helper to determine remaining time relative to real current time
-export function getTimeRemaining(endingDateStr: string) {
+export function getTimeRemaining(endingDateStr: string, startDateStr?: string | null, isLive?: boolean) {
   const nowTime = Date.now();
+
+  // If live auction, show countdown to start if in future
+  if (isLive && startDateStr) {
+    const startTime = new Date(startDateStr).getTime();
+    if (!isNaN(startTime)) {
+      const diffStart = startTime - nowTime;
+      if (diffStart > 0) {
+        const days = Math.floor(diffStart / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((diffStart % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        if (days > 1) return { text: `Live in ${days} days`, isUrgent: false, isExpired: false };
+        if (days === 1) return { text: `Live Tomorrow`, isUrgent: false, isExpired: false };
+        if (hours > 0) return { text: `Live in ${hours}h`, isUrgent: true, isExpired: false };
+        return { text: `Live Today`, isUrgent: true, isExpired: false };
+      }
+    }
+  }
+
   const endTime = new Date(endingDateStr).getTime();
   
   if (isNaN(endTime)) {
@@ -45,7 +64,7 @@ export function getTimeRemaining(endingDateStr: string) {
   if (days > 2) {
     return { text: `${days} days left`, isUrgent: false, isExpired: false };
   } else if (days > 0) {
-    return { text: `${days}d ${hours}h left`, isUrgent: true, isExpired: false };
+    return { text: `${days}d ${hours}h left`, isUrgent: false, isExpired: false };
   } else if (hours > 0) {
     return { text: `${hours}h ${minutes}m left`, isUrgent: true, isExpired: false };
   } else {
@@ -95,6 +114,7 @@ export default function AuctionList({
   activeSearchTerm,
   selectedCategory
 }: AuctionListProps) {
+  const { isLotWatchlisted, addToWatchlist, removeFromWatchlist } = useAuth();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const toggleExpand = (id: string) => {
@@ -106,13 +126,15 @@ export default function AuctionList({
       const date = new Date(isoString);
       if (isNaN(date.getTime())) return isoString;
       
-      return date.toLocaleDateString("en-US", {
+      return date.toLocaleDateString("en-GB", {
+        timeZone: "Europe/London",
         weekday: "short",
-        month: "short",
         day: "numeric",
+        month: "short",
+        year: "numeric",
         hour: "2-digit",
         minute: "2-digit"
-      });
+      }) + " (UK)";
     } catch {
       return isoString;
     }
@@ -168,7 +190,7 @@ export default function AuctionList({
         ) : (
           listings.map((item) => {
             const isExpanded = expandedId === item.id;
-            const timeInfo = getTimeRemaining(item.endingDate);
+            const timeInfo = getTimeRemaining(item.endingDate, item.startDate, item.auctionType === "Live");
 
             return (
               <div 
@@ -191,9 +213,18 @@ export default function AuctionList({
                       <img 
                         src={item.imageUrl} 
                         alt={item.title} 
-                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                         referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                         loading="lazy"
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          const originalUrl = item.imageUrl;
+                          if (originalUrl && originalUrl.startsWith("http") && !target.src.includes("/api/proxy/image")) {
+                            target.src = `/api/proxy/image?url=${encodeURIComponent(originalUrl)}`;
+                          } else {
+                            target.src = "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&q=80";
+                          }
+                        }}
                       />
                       <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
@@ -217,9 +248,9 @@ export default function AuctionList({
                             <span className="inline-flex items-center text-[10px] font-bold bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">
                               BPI / Artisio
                             </span>
-                          ) : item.id.startsWith("bs-") ? (
+                          ) : item.id.startsWith("atg-") ? (
                             <span className="inline-flex items-center text-[10px] font-bold bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200">
-                              BidSpotter
+                              {item.auctioneer || "ATG Media"}
                             </span>
                           ) : null}
                           {/* Category Badge */}
@@ -240,14 +271,70 @@ export default function AuctionList({
                         </h4>
                       </div>
 
-                      {/* Time / Countdown & Current Price Block with Professional Polish color scheme */}
+                      {/* Time / Countdown & Current Price Block */}
                       <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
-                        {item.currentPrice !== undefined && (
-                          <div className="font-sans font-bold text-emerald-700 text-xs sm:text-sm bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-md flex items-center gap-1 shadow-2xs">
-                            <span className="text-[9px] uppercase font-bold text-emerald-600/80 tracking-wider">Bid:</span>
-                            <span>{item.country === "UK" ? "£" : "$"}{item.currentPrice.toLocaleString()}</span>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                          {/* Watchlist Star Toggle */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (isLotWatchlisted(item.id)) {
+                                removeFromWatchlist(item.id);
+                              } else {
+                                addToWatchlist(item);
+                              }
+                            }}
+                            className={`p-1 rounded-md transition-colors cursor-pointer ${
+                              isLotWatchlisted(item.id)
+                                ? "bg-amber-50 text-amber-500 hover:bg-amber-100"
+                                : "text-slate-300 hover:text-amber-500 hover:bg-slate-100"
+                            }`}
+                            title={isLotWatchlisted(item.id) ? "Saved in Watchlist (Click to remove)" : "Save to Watchlist"}
+                          >
+                            <Star className={`w-4 h-4 ${isLotWatchlisted(item.id) ? "fill-amber-400 text-amber-500" : ""}`} />
+                          </button>
+
+                          {/* Estimate badge */}
+                          {item.estimateStr && (
+                            <div className="font-sans font-bold text-slate-700 text-xs sm:text-sm bg-slate-100 border border-slate-200/60 px-2 py-0.5 rounded-md flex items-center gap-1 shadow-2xs">
+                              <span className="text-[9px] uppercase font-bold text-slate-500 tracking-wider">Est:</span>
+                              <span>{item.estimateStr}</span>
+                            </div>
+                          )}
+
+                          {/* Bid badge: show opening bid or current bid. Never show £0 */}
+                          {(() => {
+                            const effectiveBid = (item.currentPrice != null && item.currentPrice > 0)
+                              ? item.currentPrice
+                              : (item.startPrice != null && item.startPrice > 0 ? item.startPrice : null);
+
+                            if (effectiveBid != null) {
+                              return (
+                                <div className="font-sans font-bold text-emerald-700 text-xs sm:text-sm bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-md flex items-center gap-1 shadow-2xs">
+                                  <span className="text-[9px] uppercase font-bold text-emerald-600/80 tracking-wider">Bid:</span>
+                                  <span>{item.country === "UK" ? "£" : "$"}{effectiveBid.toLocaleString()}</span>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
+                          
+                          {/* Reserve: ONLY show if reserve is strictly in place above the opening bid */}
+                          {(() => {
+                            const opening = (item.currentPrice != null && item.currentPrice > 0)
+                              ? item.currentPrice
+                              : (item.startPrice != null && item.startPrice > 0 ? item.startPrice : 0);
+                            if (item.reserve != null && item.reserve > opening) {
+                              return (
+                                <div className="font-sans font-bold text-purple-700 text-xs sm:text-sm bg-purple-50 border border-purple-200/60 px-2 py-0.5 rounded-md flex items-center gap-1 shadow-2xs">
+                                  <span className="text-[9px] uppercase font-bold text-purple-600/80 tracking-wider">Res:</span>
+                                  <span>{item.country === "UK" ? "£" : "$"}{item.reserve.toLocaleString()}</span>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
                         <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
                           timeInfo.isExpired
                             ? "bg-slate-100 text-slate-500"
@@ -288,7 +375,7 @@ export default function AuctionList({
                     
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <div className="text-[11px] text-slate-500">
-                        <span className="font-bold text-slate-700">Deadline:</span> {formatDate(item.endingDate)}
+                        <span className="font-bold text-slate-700">{item.auctionType === "Live" ? "Auction Date:" : "Deadline:"}</span> {formatDate(item.auctionType === "Live" && item.startDate ? item.startDate : item.endingDate)}
                       </div>
 
                       <div className="flex items-center gap-2">
