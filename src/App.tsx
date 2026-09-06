@@ -105,14 +105,36 @@ export default function App() {
 
   // Load initial listings on mount
   useEffect(() => {
-    fetch("/api/auctions")
-      .then((res) => res.json())
-      .then((payload) => {
-        if (payload.status === "success") {
+    let isMounted = true;
+    const loadInitialAuctions = async (retryCount = 0) => {
+      try {
+        const res = await fetch("/api/auctions");
+        const cType = res.headers.get("content-type") || "";
+        if (!res.ok || !cType.includes("application/json")) {
+          if (retryCount < 2) {
+            setTimeout(() => {
+              if (isMounted) loadInitialAuctions(retryCount + 1);
+            }, 2500);
+          }
+          return;
+        }
+        const payload = await res.json();
+        if (isMounted && payload.status === "success" && Array.isArray(payload.data)) {
           setListings(payload.data);
         }
-      })
-      .catch((err) => console.error("Error loading base auctions:", err));
+      } catch (err) {
+        if (retryCount < 2) {
+          setTimeout(() => {
+            if (isMounted) loadInitialAuctions(retryCount + 1);
+          }, 2500);
+        }
+      }
+    };
+
+    loadInitialAuctions();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Helper to extract safe string representation from any field
@@ -236,24 +258,70 @@ export default function App() {
     }, 1200);
  
     try {
-      const response = await fetch("/api/auctions/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyword: searchKw.trim() })
-      });
+      let response: Response;
+      try {
+        response = await fetch("/api/auctions/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keyword: searchKw.trim() })
+        });
+      } catch {
+        // Network connection hiccup, wait 2s and retry once
+        await new Promise((r) => setTimeout(r, 2000));
+        response = await fetch("/api/auctions/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keyword: searchKw.trim() })
+        });
+      }
+
+      // Check if response is HTML (e.g. 502/503/504 warmup page)
+      let contentType = response.headers.get("content-type") || "";
+      if (!response.ok || !contentType.includes("application/json")) {
+        // Server may be initializing; wait 2.5s and retry once
+        await new Promise((r) => setTimeout(r, 2500));
+        response = await fetch("/api/auctions/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keyword: searchKw.trim() })
+        });
+        contentType = response.headers.get("content-type") || "";
+      }
+
+      if (!response.ok || !contentType.includes("application/json")) {
+        const text = await response.text();
+        if (text.includes("warmup") || text.startsWith("<!doctype") || [502, 503, 504].includes(response.status)) {
+          throw new Error("The search service is currently initializing. Please try your search again in a moment.");
+        }
+        throw new Error(`The search service returned status ${response.status}. Please try again.`);
+      }
+
       const payload = await response.json();
- 
+
       if (payload.status === "success") {
         if (payload.breakdown) {
           setSearchBreakdown(payload.breakdown);
         }
         // Fetch all in-memory auctions which now include the freshly scraped ones!
-        const allRes = await fetch("/api/auctions");
-        const allPayload = await allRes.json();
-        if (allPayload.status === "success") {
-          setListings(allPayload.data);
+        try {
+          const allRes = await fetch("/api/auctions");
+          const allCtype = allRes.headers.get("content-type") || "";
+          if (allRes.ok && allCtype.includes("application/json")) {
+            const allPayload = await allRes.json();
+            if (allPayload.status === "success" && Array.isArray(allPayload.data)) {
+              setListings(allPayload.data);
+            } else if (Array.isArray(payload.data)) {
+              setListings(payload.data);
+            }
+          } else if (Array.isArray(payload.data)) {
+            setListings(payload.data);
+          }
+        } catch {
+          if (Array.isArray(payload.data)) {
+            setListings(payload.data);
+          }
         }
- 
+
         if (payload.references) {
           setSourceReferences(payload.references);
         }

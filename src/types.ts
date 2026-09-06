@@ -20,6 +20,7 @@ export interface AuctionListing {
   auctionType?: string;
   imageUrl?: string;
   sourcePlatform?: string;
+  isUnpriced?: boolean;
 }
 
 export interface AuctionCluster {
