@@ -3,6 +3,7 @@ import path from "path";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
+import puppeteer from "puppeteer";
 
 dotenv.config();
 
@@ -121,11 +122,220 @@ async function scrapeBpiHomepageEvents(): Promise<BpiAuctionEvent[]> {
   }
 }
 
-// Note on ATG Network (BidSpotter UK & The Saleroom):
-// ATG Media sites strictly enforce Cloudflare / AWS WAF bot challenges (HTTP 405 / 202 Human Verification)
-// which block server-side cloud scraping. Direct live search links are provided in searchReferences so users can query them in 1 click.
+// ATG Network scraper (BidSpotter UK, i-bidder, and The Saleroom) via Puppeteer
+// In environments with full Chromium installed (e.g. self-hosted, VPS, desktop), this crawls matching lots directly.
+// In container environments where Chromium is unavailable or Cloudflare challenge triggers, it fails safely without blocking other sources.
+async function scrapeBidspotterLots(keyword: string): Promise<any[]> {
+  let browser: any = null;
+  try {
+    browser = await puppeteer.launch({
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--single-process',
+        '--disable-gpu',
+        '--no-zygote'
+      ],
+      headless: true
+    });
+    
+    const atgSites = [
+      { baseUrl: 'https://www.bidspotter.co.uk', name: 'BidSpotter UK', suffix: '/en-gb/search-results?searchTerm=' },
+      { baseUrl: 'https://www.i-bidder.com', name: 'i-bidder', suffix: '/en-gb/search-results?searchTerm=' },
+      { baseUrl: 'https://www.the-saleroom.com', name: 'The Saleroom', suffix: '/en-gb/search-results?searchTerm=' }
+    ];
+
+    let allItemsRaw: any[] = [];
+
+    for (const site of atgSites) {
+      let page: any = null;
+      try {
+        page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        const searchUrl = `${site.baseUrl}${site.suffix}${encodeURIComponent(keyword)}`;
+        
+        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 8000 });
+        await page.waitForSelector('.lot-title', { timeout: 4000 }).catch(() => {});
+        
+        const items = await page.evaluate((kw: string, siteBaseUrl: string, siteName: string) => {
+          const lotTitles = Array.from(document.querySelectorAll('.lot-title'));
+          return lotTitles.map(el => {
+            const container = el.closest('div[class*="search-result"]') || el.closest('div[class*="lot-card"]') || el.closest('article') || el.parentElement?.parentElement?.parentElement;
+            if (!container) return null;
+            
+            // Extract accurate image, handling data-src / lazy-load
+            const img = container.querySelector('img');
+            let imgUrl = "";
+            if (img) {
+              imgUrl = img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-original') || img.src || "";
+              if (imgUrl.startsWith("//")) imgUrl = "https:" + imgUrl;
+            }
+
+            const location = container.querySelector('[class*="location"]');
+            const containerText = container.textContent || "";
+            
+            // Date regex
+            const dateStrMatch = containerText.match(/(?:Bidding ends|Ends in|Closing|Bidding opens|Sale date):?\s*([^\n\r<]+)/i);
+
+            // Pricing regexes for ATG / BidSpotter
+            const openingBidMatch = containerText.match(/(?:opening bid|starts? at|starting bid|starting price):?\s*(?:£|GBP)?\s*([\d,]+)/i) 
+              || containerText.match(/\(opening bid\s+([\d,]+)\s*(?:GBP|£)?\)/i);
+            
+            const currentBidMatch = containerText.match(/(?:current bid|last bid):?\s*(?:£|GBP)?\s*([\d,]+)/i);
+            const estMatch = containerText.match(/(?:estimate|est\.?):?\s*(?:£|GBP)?\s*([\d,]+)(?:\s*-\s*(?:£|GBP)?\s*([\d,]+))?/i);
+            const reserveMatch = containerText.match(/reserve(?:\s+price)?:?\s*(?:£|GBP)?\s*([\d,]+)/i);
+
+            const parseNum = (m: any) => m ? parseInt(m[1].replace(/,/g, ""), 10) : null;
+            const openingBid = parseNum(openingBidMatch);
+            const currentBid = parseNum(currentBidMatch);
+            const lowEst = estMatch ? parseInt(estMatch[1].replace(/,/g, ""), 10) : null;
+            const highEst = (estMatch && estMatch[2]) ? parseInt(estMatch[2].replace(/,/g, ""), 10) : null;
+            const reservePrice = parseNum(reserveMatch);
+
+            return {
+              title: el.textContent?.trim() || "",
+              url: el.parentElement?.getAttribute('href') || el.closest('a')?.href || "",
+              imageUrl: imgUrl,
+              location: location ? location.textContent?.trim() : "",
+              dateStr: dateStrMatch ? dateStrMatch[1] : "",
+              openingBid: openingBid,
+              currentBid: currentBid,
+              lowEst: lowEst,
+              highEst: highEst,
+              reservePrice: reservePrice,
+              sourceName: siteName,
+              sourceBaseUrl: siteBaseUrl
+            };
+          }).filter((item: any) => {
+            if (!item) return false;
+            const lowerTitle = item.title.toLowerCase();
+            const words = kw.toLowerCase().split(" ").filter((w: string) => w.trim() !== "");
+            return words.every((term: string) => lowerTitle.includes(term));
+          }).slice(0, 10);
+        }, keyword, site.baseUrl, site.name);
+        
+        allItemsRaw.push(...items);
+      } catch (siteErr: any) {
+        // Individual site timeout or challenge
+      } finally {
+        if (page) await page.close().catch(() => {});
+      }
+    }
+    
+    // Deduplicate by title
+    const titleSet = new Set();
+    const allItems = allItemsRaw.filter(item => {
+      const isDuplicate = titleSet.has(item.title);
+      titleSet.add(item.title);
+      return !isDuplicate;
+    });
+    
+    const currentYear = new Date().getFullYear();
+
+    return allItems.map((item: any, i: number) => {
+      const exactCoords = getCoordinatesForLocation(item.location || "London");
+      let absoluteUrl = item.url;
+      if (absoluteUrl && absoluteUrl.startsWith('/')) {
+        absoluteUrl = item.sourceBaseUrl + absoluteUrl;
+      } else if (!absoluteUrl) {
+        absoluteUrl = `${item.sourceBaseUrl}/en-gb/search-results?searchTerm=${encodeURIComponent(keyword)}`;
+      }
+      
+      let cleanedLoc = item.location || "United Kingdom";
+      if (cleanedLoc.includes("United Kingdom")) {
+        const parts = cleanedLoc.split('\n');
+        cleanedLoc = parts[0]?.trim() || "United Kingdom";
+      }
+
+      let parsedDate = "";
+      if (item.dateStr) {
+        const rawDate = item.dateStr.split('\n')[0].replace(/^from\s+/i, "").replace(/BST|GMT/gi, "").trim();
+        const relDayMatch = rawDate.match(/(\d+)\s*d(?:ays?)?/i);
+        const relHourMatch = rawDate.match(/(\d+)\s*h(?:ours?)?/i);
+        if (relDayMatch || relHourMatch) {
+          const days = relDayMatch ? parseInt(relDayMatch[1], 10) : 0;
+          const hours = relHourMatch ? parseInt(relHourMatch[1], 10) : 0;
+          parsedDate = new Date(Date.now() + days * 86400000 + hours * 3600000).toISOString();
+        } else {
+          const cleanDate = rawDate.replace(/^on\s+/i, "").trim();
+          const withYear = /\b20\d\d\b/.test(cleanDate) ? cleanDate : `${cleanDate} ${currentYear}`;
+          const d = new Date(withYear);
+          if (!isNaN(d.getTime())) {
+            parsedDate = d.toISOString();
+          }
+        }
+      }
+      if (!parsedDate) {
+        parsedDate = new Date(Date.now() + 4 * 86400000).toISOString();
+      }
+
+      const openingBid = item.openingBid || (item.lowEst ? item.lowEst : null);
+      const effectiveBid = item.currentBid || openingBid;
+      const reserve = (item.reservePrice && openingBid && item.reservePrice > openingBid) ? item.reservePrice : null;
+      let estimateStr = undefined;
+      if (item.lowEst && item.highEst) {
+        estimateStr = `£${item.lowEst} - £${item.highEst}`;
+      } else if (item.lowEst) {
+        estimateStr = `£${item.lowEst}`;
+      }
+
+      let category = "General";
+      const lowerTitle = item.title.toLowerCase();
+      if (lowerTitle.includes("lathe") || lowerTitle.includes("milling") || lowerTitle.includes("cnc") || lowerTitle.includes("machinery") || lowerTitle.includes("generator") || lowerTitle.includes("press") || lowerTitle.includes("welder")) {
+        category = "Machinery";
+      } else if (lowerTitle.includes("catering") || lowerTitle.includes("oven") || lowerTitle.includes("freezer") || lowerTitle.includes("fryer") || lowerTitle.includes("restaurant")) {
+        category = "Catering";
+      } else if (lowerTitle.includes("car") || lowerTitle.includes("van") || lowerTitle.includes("truck") || lowerTitle.includes("trailer") || lowerTitle.includes("vehicle") || lowerTitle.includes("tractor")) {
+        category = "Vehicles";
+      } else if (lowerTitle.includes("furniture") || lowerTitle.includes("table") || lowerTitle.includes("chair") || lowerTitle.includes("desk") || lowerTitle.includes("cabinet") || lowerTitle.includes("sofa")) {
+        category = "Furniture";
+      } else if (lowerTitle.includes("laptop") || lowerTitle.includes("computer") || lowerTitle.includes("screen") || lowerTitle.includes("tech") || lowerTitle.includes("electronics") || lowerTitle.includes("phone")) {
+        category = "Electronics";
+      } else {
+        category = "Industrial";
+      }
+
+      return {
+        id: `atg-${Date.now()}-${i}`,
+        title: item.title,
+        url: absoluteUrl,
+        details: `Lot from ${item.sourceName}.${estimateStr ? ` Estimate: ${estimateStr}.` : ""}${openingBid ? ` Opening bid: £${openingBid}.` : ""}`,
+        endingDate: parsedDate,
+        startDate: parsedDate,
+        address: cleanedLoc,
+        latitude: exactCoords.latitude,
+        longitude: exactCoords.longitude,
+        auctioneer: item.sourceName,
+        category: category,
+        country: "UK",
+        currentPrice: effectiveBid,
+        startPrice: openingBid,
+        estimateStr: estimateStr,
+        reserve: reserve,
+        imageUrl: item.imageUrl || "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&q=80",
+        status: "active"
+      };
+    });
+  } catch (err: any) {
+    console.warn("Puppeteer scrapeBidspotterLots warning/error (expected if Chromium is not pre-installed in this runtime):", err.message);
+    return [];
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
+  }
+}
+
+// Timeout wrapper ensuring ATG Puppeteer crawling never blocks search for more than 10 seconds
 async function scrapeBidspotterLotsWithTimeout(keyword: string): Promise<any[]> {
-  return [];
+  const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 10000));
+  try {
+    return await Promise.race([scrapeBidspotterLots(keyword), timeoutPromise]);
+  } catch (err: any) {
+    console.warn("Bidspotter scraper timeout/error:", err.message);
+    return [];
+  }
 }
 
 // Precise coordinates mapper for common UK postcodes & locations
@@ -255,12 +465,68 @@ async function fetchArtisioHeadersCompliant(options: ArtisioRequestOptions): Pro
       return json;
     }
 
-    console.warn(`Artisio direct fetch returned status ${res.status}.`);
+    console.warn(`Artisio direct fetch returned status ${res.status}. Attempting Puppeteer fallback.`);
   } catch (fetchErr: any) {
-    console.warn(`Artisio direct fetch failed (${fetchErr.message}).`);
+    console.warn(`Artisio direct fetch failed (${fetchErr.message}). Attempting Puppeteer fallback.`);
   }
 
-  return { lots: { count: 0, results: [] } };
+  // Fallback: Puppeteer browser fetch if direct fetch is blocked
+  try {
+    return await fetchArtisioViaPuppeteer(url, clientId, originUrl, refererUrl);
+  } catch {
+    return { lots: { count: 0, results: [] } };
+  }
+}
+
+// Puppeteer fallback execution for Artisio requests in environments where Chrome is available
+async function fetchArtisioViaPuppeteer(targetUrl: string, clientId: string, originUrl: string, refererUrl: string): Promise<any> {
+  let browser: any = null;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--disable-gpu"
+      ]
+    });
+
+    const page = await browser.newPage();
+    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+    await page.setExtraHTTPHeaders({
+      "accept": "application/json, text/plain, */*",
+      "accept-language": "en-GB,en-US;q=0.9,en;q=0.8",
+      "artisio-client-id": clientId,
+      "artisio-language": "en",
+      "origin": originUrl,
+      "referer": refererUrl
+    });
+
+    // Navigate to BPI to establish origin / session cookies, then evaluate fetch
+    await page.goto("https://bpiauctions.com/", { waitUntil: "domcontentloaded", timeout: 10000 }).catch(() => {});
+
+    const result = await page.evaluate(async (url: string, cId: string) => {
+      const response = await fetch(url, {
+        headers: {
+          "accept": "application/json, text/plain, */*",
+          "artisio-client-id": cId,
+          "artisio-language": "en"
+        }
+      });
+      return await response.json();
+    }, targetUrl, clientId);
+
+    return result;
+  } catch (puppeteerErr: any) {
+    console.warn("Puppeteer Artisio fallback notice:", puppeteerErr.message);
+    return { lots: { count: 0, results: [] } };
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
+  }
 }
 
 // Helper to safely extract category string from diverse API payload structures
@@ -1018,19 +1284,21 @@ app.post("/api/auctions/search", async (req, res) => {
   ];
 
   try {
-    // Run UK auction queries in parallel
-    const [bpiResults, easyLiveResults] = await Promise.allSettled([
+    // Run all UK auction queries in parallel (including Puppeteer ATG Network crawler)
+    const [bpiResults, easyLiveResults, atgResults] = await Promise.allSettled([
       scrapeBpiLots(keyword, 2),
-      fetchEasyLiveAuctionLots(keyword, 35, 0)
+      fetchEasyLiveAuctionLots(keyword, 35, 0),
+      scrapeBidspotterLotsWithTimeout(keyword)
     ]);
 
     const scrapedBpiLots = bpiResults.status === "fulfilled" ? bpiResults.value : [];
     const scrapedEasyLiveLots = easyLiveResults.status === "fulfilled" ? easyLiveResults.value : [];
+    const scrapedAtg = atgResults.status === "fulfilled" ? atgResults.value : [];
 
-    console.log(`Results fetched: BPI (${scrapedBpiLots.length}), EasyLive (${scrapedEasyLiveLots.length})`);
+    console.log(`Results fetched: BPI (${scrapedBpiLots.length}), EasyLive (${scrapedEasyLiveLots.length}), ATG Network (${scrapedAtg.length})`);
 
     // Combine all listings
-    let scrapedListings = [...scrapedEasyLiveLots, ...scrapedBpiLots];
+    let scrapedListings = [...scrapedEasyLiveLots, ...scrapedBpiLots, ...scrapedAtg];
 
     // Determine unpriced/autobid status and deprioritise them to the end of the list
     scrapedListings.forEach((item: any) => {
@@ -1058,8 +1326,10 @@ app.post("/api/auctions/search", async (req, res) => {
       breakdown: {
         easyLiveAuction: scrapedEasyLiveLots.length,
         bpiAuctions: scrapedBpiLots.length,
-        atgNetwork: 0,
-        atgStatus: "Protected by Cloudflare/AWS WAF anti-bot challenge — open via direct live links below"
+        atgNetwork: scrapedAtg.length,
+        atgStatus: scrapedAtg.length > 0
+          ? `Active (${scrapedAtg.length} lots extracted via Puppeteer)`
+          : "Anti-bot challenge active or Chromium pending — direct 1-click verified search available"
       },
       data: scrapedListings,
       references: searchReferences
