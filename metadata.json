@@ -1,0 +1,6 @@
+{
+  "name": "Commercial Auction Map Scraper",
+  "description": "Scrapes, aggregates, and clusters commercial asset auctions and liquidations onto a 50-mile region map, with dynamic keyword and date deadline filters.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

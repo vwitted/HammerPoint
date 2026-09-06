@@ -1,0 +1,337 @@
+import React, { useState } from "react";
+import { AuctionListing, AuctionCluster } from "../types";
+import { 
+  Calendar, 
+  MapPin, 
+  ExternalLink, 
+  Tag, 
+  Building2, 
+  Clock, 
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  MapIcon
+} from "lucide-react";
+
+interface AuctionListProps {
+  listings: AuctionListing[];
+  selectedCluster: AuctionCluster | null;
+  onClusterSelect: (cluster: AuctionCluster | null) => void;
+  onListingSelect: (listing: AuctionListing) => void;
+  onViewOnMap: (listing: AuctionListing) => void;
+  activeSearchTerm: string;
+  selectedCategory: string;
+}
+
+// Helper to determine remaining time relative to real current time
+export function getTimeRemaining(endingDateStr: string) {
+  const nowTime = Date.now();
+  const endTime = new Date(endingDateStr).getTime();
+  
+  if (isNaN(endTime)) {
+    return { text: endingDateStr, isUrgent: false, isExpired: false };
+  }
+  
+  const diff = endTime - nowTime;
+
+  if (diff <= 0) {
+    return { text: "Bidding Closed", isUrgent: false, isExpired: true };
+  }
+
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+  if (days > 2) {
+    return { text: `${days} days left`, isUrgent: false, isExpired: false };
+  } else if (days > 0) {
+    return { text: `${days}d ${hours}h left`, isUrgent: true, isExpired: false };
+  } else if (hours > 0) {
+    return { text: `${hours}h ${minutes}m left`, isUrgent: true, isExpired: false };
+  } else {
+    return { text: `${Math.max(1, minutes)}m left`, isUrgent: true, isExpired: false };
+  }
+}
+
+// Safe category string extractor helper
+export function getCategoryString(category: any): string {
+  if (!category) return "General";
+  if (typeof category === "string") return category;
+  if (typeof category === "object") {
+    if (typeof category.name === "string") return category.name;
+    if (category.name && typeof category.name.en === "string") return category.name.en;
+    if (typeof category.title === "string") return category.title;
+    if (category.title && typeof category.title.en === "string") return category.title.en;
+    if (typeof category.en === "string") return category.en;
+  }
+  return String(category || "General");
+}
+
+// Category tag styling helper matching the Professional Polish palette
+function getCategoryBadgeClass(category: any) {
+  const cat = getCategoryString(category).toLowerCase();
+  if (cat.includes("rest") || cat.includes("cater")) {
+    return "bg-amber-50 text-amber-700 border-amber-200/60";
+  } else if (cat.includes("ind") || cat.includes("mfg") || cat.includes("machin")) {
+    return "bg-blue-50 text-blue-700 border-blue-200/60";
+  } else if (cat.includes("tech") || cat.includes("off") || cat.includes("electr")) {
+    return "bg-purple-50 text-purple-700 border-purple-200/60";
+  } else if (cat.includes("med") || cat.includes("lab")) {
+    return "bg-emerald-50 text-emerald-700 border-emerald-200/60";
+  } else if (cat.includes("veh") || cat.includes("fleet") || cat.includes("car") || cat.includes("van") || cat.includes("truck")) {
+    return "bg-rose-50 text-rose-700 border-rose-200/60";
+  } else if (cat.includes("estate") || cat.includes("land") || cat.includes("furnit")) {
+    return "bg-teal-50 text-teal-700 border-teal-200/60";
+  } else {
+    return "bg-slate-50 text-slate-700 border-slate-200/60";
+  }
+}
+
+export default function AuctionList({
+  listings,
+  selectedCluster,
+  onClusterSelect,
+  onViewOnMap,
+  activeSearchTerm,
+  selectedCategory
+}: AuctionListProps) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const toggleExpand = (id: string) => {
+    setExpandedId(expandedId === id ? null : id);
+  };
+
+  const formatDate = (isoString: string) => {
+    try {
+      const date = new Date(isoString);
+      if (isNaN(date.getTime())) return isoString;
+      
+      return date.toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    } catch {
+      return isoString;
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+      {/* Cluster Active Filter Indicator with Blue styling */}
+      {selectedCluster && (
+        <div className="bg-blue-50 border-b border-blue-100 p-3 flex items-center justify-between text-xs text-blue-900 font-medium">
+          <span className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
+            Filtering by region around: <strong className="text-blue-950 font-bold max-w-[200px] truncate block md:inline">{selectedCluster.centerAddress}</strong>
+          </span>
+          <button
+            onClick={() => onClusterSelect(null)}
+            className="text-[11px] font-bold text-blue-700 hover:text-blue-900 bg-blue-100/80 hover:bg-blue-200/80 px-2.5 py-1 rounded transition-colors"
+          >
+            Clear region
+          </button>
+        </div>
+      )}
+
+      {/* Header Info */}
+      <div className="p-4 border-b border-slate-150 bg-slate-50/80 flex items-center justify-between">
+        <h3 className="font-bold text-slate-700 text-sm flex items-center gap-2">
+          <span>
+            {activeSearchTerm 
+              ? `Results for "${activeSearchTerm}"` 
+              : selectedCategory !== "All" 
+                ? `${selectedCategory} Lots` 
+                : "All Curated Lots"}
+          </span>
+          <span className="bg-slate-200/80 text-slate-700 px-2 py-0.5 rounded-md text-xs font-mono font-bold">
+            {listings.length}
+          </span>
+        </h3>
+        <span className="text-xs text-slate-400 font-medium">
+          Ends in local times
+        </span>
+      </div>
+
+      {/* Listing Content Scroll Container */}
+      <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+        {listings.length === 0 ? (
+          <div className="p-8 text-center text-slate-400 flex flex-col items-center justify-center h-full min-h-[260px]">
+            <AlertTriangle className="w-10 h-10 text-slate-300 mb-3" />
+            <p className="text-sm font-bold text-slate-700">No auctions match current filters</p>
+            <p className="text-xs text-slate-500 mt-2 max-w-[280px] leading-relaxed">
+              If you have set strict bidding deadlines or category constraints, try expanding them. You can also clear any active region filters, or enter a new keyword above to launch a real-time web search.
+            </p>
+          </div>
+        ) : (
+          listings.map((item) => {
+            const isExpanded = expandedId === item.id;
+            const timeInfo = getTimeRemaining(item.endingDate);
+
+            return (
+              <div 
+                key={item.id} 
+                className={`p-4 transition-colors duration-150 border-l-4 hover:bg-blue-50/30 ${
+                  timeInfo.isUrgent 
+                    ? "border-l-red-500 bg-red-50/10" 
+                    : isExpanded
+                      ? "border-l-blue-600 bg-blue-50/10"
+                      : "border-l-transparent"
+                }`}
+              >
+                <div className="flex gap-4">
+                  {/* Default photo embed */}
+                  {item.imageUrl && (
+                    <div 
+                      onClick={() => toggleExpand(item.id)}
+                      className="w-16 h-16 sm:w-20 sm:h-20 rounded-lg overflow-hidden border border-slate-200 bg-slate-50 shrink-0 self-start shadow-xs cursor-pointer group relative"
+                    >
+                      <img 
+                        src={item.imageUrl} 
+                        alt={item.title} 
+                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        referrerPolicy="no-referrer"
+                        loading="lazy"
+                      />
+                      <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                  )}
+
+                  <div className="flex-1 min-w-0">
+                    {/* Header Summary */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap gap-2 items-center mb-1">
+                          {/* Country Flag Badge */}
+                          <span className="inline-flex items-center text-[10px] font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200">
+                            {item.country === "UK" ? "🇬🇧 UK" : "🇺🇸 US"}
+                          </span>
+                          {/* Platform Badge */}
+                          {item.id.startsWith("easylive") ? (
+                            <span className="inline-flex items-center text-[10px] font-bold bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-200">
+                              Easy Live
+                            </span>
+                          ) : item.id.startsWith("bpilot") ? (
+                            <span className="inline-flex items-center text-[10px] font-bold bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">
+                              BPI / Artisio
+                            </span>
+                          ) : item.id.startsWith("bs-") ? (
+                            <span className="inline-flex items-center text-[10px] font-bold bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200">
+                              BidSpotter
+                            </span>
+                          ) : null}
+                          {/* Category Badge */}
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border tracking-wider uppercase ${getCategoryBadgeClass(item.category)}`}>
+                            {getCategoryString(item.category)}
+                          </span>
+                          {/* Auctioneer Badge */}
+                          <span className="inline-flex items-center text-[11px] text-slate-500 font-bold uppercase tracking-tight">
+                            {item.auctioneer}
+                          </span>
+                        </div>
+
+                        <h4 
+                          className="font-bold text-slate-900 text-sm md:text-base tracking-tight leading-snug hover:text-blue-600 transition-colors cursor-pointer" 
+                          onClick={() => toggleExpand(item.id)}
+                        >
+                          {item.title}
+                        </h4>
+                      </div>
+
+                      {/* Time / Countdown & Current Price Block with Professional Polish color scheme */}
+                      <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
+                        {item.currentPrice !== undefined && (
+                          <div className="font-sans font-bold text-emerald-700 text-xs sm:text-sm bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-md flex items-center gap-1 shadow-2xs">
+                            <span className="text-[9px] uppercase font-bold text-emerald-600/80 tracking-wider">Bid:</span>
+                            <span>{item.country === "UK" ? "£" : "$"}{item.currentPrice.toLocaleString()}</span>
+                          </div>
+                        )}
+                        <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                          timeInfo.isExpired
+                            ? "bg-slate-100 text-slate-500"
+                            : timeInfo.isUrgent
+                              ? "bg-red-50 text-red-600 border border-red-200/50 animate-pulse"
+                              : "bg-blue-50 text-blue-600 border border-blue-200/50"
+                        }`}>
+                          <Clock className="w-3 h-3" />
+                          {timeInfo.text}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Subtitle / Address Summary */}
+                    <div className="mt-2.5 flex items-center justify-between text-xs text-slate-500">
+                      <span className="flex items-center gap-1 truncate max-w-[150px] sm:max-w-[240px] md:max-w-[300px]">
+                        <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        {item.address}
+                      </span>
+                      {!isExpanded && (
+                        <button 
+                          onClick={() => toggleExpand(item.id)}
+                          className="text-[11px] text-blue-600 hover:text-blue-700 font-bold"
+                        >
+                          Details
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expanded Details Section */}
+                {isExpanded ? (
+                  <div className="mt-3 pt-3 border-t border-slate-150 text-xs text-slate-600 space-y-3">
+                    <p className="leading-relaxed bg-slate-50 p-3 rounded border border-slate-200/60 text-slate-700">
+                      {item.details}
+                    </p>
+                    
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="text-[11px] text-slate-500">
+                        <span className="font-bold text-slate-700">Deadline:</span> {formatDate(item.endingDate)}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {/* Map focus button */}
+                        <button
+                          onClick={() => onViewOnMap(item)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-bold bg-blue-50 text-blue-700 hover:bg-blue-100/80 transition-colors"
+                        >
+                          <MapIcon className="w-3.5 h-3.5" /> Locate
+                        </button>
+                        
+                        {/* External original link */}
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          referrerPolicy="no-referrer"
+                          className="inline-flex items-center gap-1 px-3 py-1 rounded text-[11px] font-bold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-xs"
+                        >
+                          Official Bidding <ExternalLink className="w-3 h-3 ml-0.5" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Quick Toggle Handler */}
+                <button 
+                  onClick={() => toggleExpand(item.id)}
+                  className="mt-2 w-full flex items-center justify-center text-slate-400 hover:text-slate-600 py-0.5 rounded transition-colors"
+                  aria-label={isExpanded ? "Collapse item" : "Expand item"}
+                >
+                  {isExpanded ? (
+                    <ChevronUp className="w-4 h-4" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 opacity-50" />
+                  )}
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
