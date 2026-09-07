@@ -226,7 +226,7 @@ export default function UserProfileModal({ isOpen, onClose, onOpenAdminPanel }: 
                   type="text"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+44 7..."
+                  placeholder="+1 (555)... or +44..."
                   className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -241,10 +241,10 @@ export default function UserProfileModal({ isOpen, onClose, onOpenAdminPanel }: 
                 onChange={(e) => setPreferredRadius(Number(e.target.value))}
                 className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               >
+                <option value={0}>∞ Unlimited (Global Worldwide)</option>
                 <option value={50}>50 Miles (Standard Local Region)</option>
                 <option value={100}>100 Miles (Regional Cluster)</option>
-                <option value={150}>150 Miles (Extended Area - Pro)</option>
-                <option value={300}>300+ Miles (Nationwide UK/US - Pro)</option>
+                <option value={250}>250 Miles (Extended Area)</option>
               </select>
             </div>
 

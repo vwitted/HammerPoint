@@ -19,20 +19,30 @@ interface AuctionMapProps {
 }
 
 // Controller component to smoothly center/zoom the map on prop changes
-function MapController({ selectedCluster }: { selectedCluster: AuctionCluster | null }) {
+function MapController({ selectedCluster, clusters }: { selectedCluster: AuctionCluster | null; clusters: AuctionCluster[] }) {
   const map = useMap();
 
   useEffect(() => {
-    if (!map || !selectedCluster) return;
+    if (!map) return;
 
-    map.panTo({ lat: selectedCluster.latitude, lng: selectedCluster.longitude });
-    // If it's a tight cluster, zoom in closer
-    if (selectedCluster.listings.length > 1) {
-      map.setZoom(11);
-    } else {
-      map.setZoom(13);
+    if (selectedCluster) {
+      map.panTo({ lat: selectedCluster.latitude, lng: selectedCluster.longitude });
+      // If it's a tight cluster, zoom in closer
+      if (selectedCluster.listings.length > 1) {
+        map.setZoom(11);
+      } else {
+        map.setZoom(13);
+      }
+    } else if (clusters.length > 0 && typeof (window as any).google !== "undefined" && (window as any).google.maps?.LatLngBounds) {
+      try {
+        const bounds = new (window as any).google.maps.LatLngBounds();
+        clusters.forEach((c) => bounds.extend({ lat: c.latitude, lng: c.longitude }));
+        map.fitBounds(bounds, 45);
+      } catch (e) {
+        // Silent fallback to default center
+      }
     }
-  }, [map, selectedCluster]);
+  }, [map, selectedCluster, clusters]);
 
   return null;
 }
@@ -240,7 +250,7 @@ export default function AuctionMap({
             );
           })}
 
-          <MapController selectedCluster={selectedCluster} />
+          <MapController selectedCluster={selectedCluster} clusters={clusters} />
         </Map>
       </APIProvider>
 
@@ -250,13 +260,13 @@ export default function AuctionMap({
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold flex items-center gap-1">
-                <Crosshair className="w-3 h-3 text-blue-600" /> Filtered region active
+                <Crosshair className="w-3 h-3 text-blue-600" /> Filtered location active
               </p>
               <p className="font-bold text-slate-800 mt-1 truncate">
                 {selectedCluster.centerAddress}
               </p>
               <p className="text-slate-500 mt-0.5">
-                Showing {selectedCluster.listings.length} commercial auction{selectedCluster.listings.length > 1 ? "s" : ""} within 50 miles.
+                Showing {selectedCluster.listings.length} commercial lot{selectedCluster.listings.length > 1 ? "s" : ""} at this facility.
               </p>
             </div>
             <button

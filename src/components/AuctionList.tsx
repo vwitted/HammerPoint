@@ -158,15 +158,14 @@ export default function AuctionList({
       const date = parseValidDate(isoString);
       if (!date) return isoString;
       
-      return date.toLocaleDateString("en-GB", {
-        timeZone: "Europe/London",
+      return date.toLocaleDateString(undefined, {
         weekday: "short",
         day: "numeric",
         month: "short",
         year: "numeric",
         hour: "2-digit",
         minute: "2-digit"
-      }) + " (UK)";
+      });
     } catch {
       return isoString || "Upcoming";
     }
@@ -247,6 +246,14 @@ export default function AuctionList({
                     <span className="inline-flex items-center text-[10px] font-bold bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200">
                       {item.auctioneer || "ATG Media"}
                     </span>
+                  ) : item.id.startsWith("hibid") ? (
+                    <span className="inline-flex items-center text-[10px] font-bold bg-amber-50 text-amber-800 px-1.5 py-0.5 rounded border border-amber-200">
+                      HiBid
+                    </span>
+                  ) : item.id.startsWith("svd") ? (
+                    <span className="inline-flex items-center text-[10px] font-bold bg-amber-50 text-amber-800 px-1.5 py-0.5 rounded border border-amber-200">
+                      SVD
+                    </span>
                   ) : null}
                   {/* Category Badge */}
                   <span className={`px-2 py-0.5 rounded text-[10px] font-bold border tracking-wider uppercase ${getCategoryBadgeClass(item.category)}`}>
@@ -304,9 +311,10 @@ export default function AuctionList({
                       : (item.startPrice != null && item.startPrice > 0 ? item.startPrice : null);
 
                     if (effectiveBid != null) {
+                      const label = item.bidLabel ? item.bidLabel.replace(/:$/, "") : "Bid";
                       return (
                         <div className="font-sans font-bold text-emerald-700 text-xs sm:text-sm bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-md flex items-center gap-1 shadow-2xs">
-                          <span className="text-[9px] uppercase font-bold text-emerald-600/80 tracking-wider">Bid:</span>
+                          <span className="text-[9px] uppercase font-bold text-emerald-600/80 tracking-wider">{label}:</span>
                           <span>{item.country === "UK" ? "£" : "$"}{effectiveBid.toLocaleString()}</span>
                         </div>
                       );
@@ -404,9 +412,13 @@ export default function AuctionList({
                   target="_blank"
                   rel="noreferrer"
                   referrerPolicy="no-referrer"
-                  className="inline-flex items-center gap-1 px-3 py-1 rounded text-[11px] font-bold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-xs"
+                  className={`inline-flex items-center gap-1 px-3 py-1 rounded text-[11px] font-bold text-white transition-colors shadow-xs ${
+                    item.id.startsWith("hibid")
+                      ? "bg-amber-600 hover:bg-amber-700"
+                      : "bg-blue-600 hover:bg-blue-700"
+                  }`}
                 >
-                  Official Bidding <ExternalLink className="w-3 h-3 ml-0.5" />
+                  {item.id.startsWith("hibid") ? "View Lot on HiBid" : "Official Bidding"} <ExternalLink className="w-3 h-3 ml-0.5" />
                 </a>
               </div>
             </div>

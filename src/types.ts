@@ -21,6 +21,9 @@ export interface AuctionListing {
   imageUrl?: string;
   sourcePlatform?: string;
   isUnpriced?: boolean;
+  bidLabel?: string;
+  minNextBid?: string;
+  reserveStatus?: string;
 }
 
 export interface AuctionCluster {

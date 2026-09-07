@@ -161,9 +161,11 @@ export default function WatchlistModal({
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
-                          {item.country === "UK" ? "🇬🇧 UK" : "🇺🇸 US"}
-                        </span>
+                        {item.country && (
+                          <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                            {item.country === "UK" ? "UK" : item.country === "US" ? "US" : item.country}
+                          </span>
+                        )}
                         <span className="text-[11px] font-bold text-slate-500 uppercase tracking-tight flex items-center gap-1">
                           <Building2 className="w-3 h-3 text-slate-400" />
                           {item.auctioneer}

@@ -32,8 +32,7 @@ export default function SearchAlertsModal({
 
   const [keyword, setKeyword] = useState("");
   const [category, setCategory] = useState("All");
-  const [radius, setRadius] = useState(50);
-  const [country, setCountry] = useState("UK");
+  const [radius, setRadius] = useState(0);
   const [isAdding, setIsAdding] = useState(false);
 
   if (!isOpen) return null;
@@ -41,7 +40,7 @@ export default function SearchAlertsModal({
   const handleCreateAlert = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!keyword.trim()) return;
-    await addSearchAlert(keyword.trim(), category, radius, country);
+    await addSearchAlert(keyword.trim(), category, radius, "Global");
     setKeyword("");
     setIsAdding(false);
   };
@@ -134,9 +133,10 @@ export default function SearchAlertsModal({
                     onChange={(e) => setRadius(Number(e.target.value))}
                     className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
+                    <option value={0}>∞ Unlimited (Worldwide)</option>
                     <option value={50}>50 Miles (Local Region)</option>
-                    <option value={100}>100 Miles</option>
-                    <option value={200}>200 Miles</option>
+                    <option value={100}>100 Miles (Regional)</option>
+                    <option value={200}>200 Miles (Extended)</option>
                   </select>
                 </div>
               </div>
@@ -194,9 +194,9 @@ export default function SearchAlertsModal({
                         <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">
                           {alert.category}
                         </span>
-                        <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
+                        <span className="text-[10px] text-slate-500 flex items-center gap-0.5">
                           <MapPin className="w-3 h-3 text-slate-400" />
-                          {alert.radius} mi
+                          {alert.radius === 0 ? "Unlimited Distance" : `${alert.radius} mi`}
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400 mt-0.5">

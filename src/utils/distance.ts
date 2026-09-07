@@ -21,9 +21,16 @@ export function getDistanceInMiles(lat1: number, lon1: number, lat2: number, lon
  * Clusters a list of auction listings.
  * Any listing within the specified radius (50 miles by default) of an existing
  * cluster's representative point will be added to that cluster.
+ * If radiusInMiles is 0, null, or Infinity (Unlimited distance), listings are clustered
+ * at tight local facility level (~5 miles) so assets at the same auction warehouse are grouped
+ * together, while preserving all geographic locations worldwide without artificial distance cutoffs.
  */
-export function clusterListings(listings: AuctionListing[], radiusInMiles = 50): AuctionCluster[] {
+export function clusterListings(listings: AuctionListing[], radiusInMiles: number | null = 50): AuctionCluster[] {
   const clusters: AuctionCluster[] = [];
+
+  // 0, null, or Infinity represents Unlimited Distance
+  const isUnlimited = radiusInMiles === null || radiusInMiles <= 0 || !isFinite(radiusInMiles);
+  const effectiveRadius = isUnlimited ? 5 : radiusInMiles;
 
   for (const listing of listings) {
     if (
@@ -46,7 +53,7 @@ export function clusterListings(listings: AuctionListing[], radiusInMiles = 50):
         cluster.longitude
       );
 
-      if (dist <= radiusInMiles) {
+      if (dist <= effectiveRadius) {
         cluster.listings.push(listing);
         joinedCluster = true;
         break;

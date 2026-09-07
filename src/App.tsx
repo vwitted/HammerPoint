@@ -19,6 +19,7 @@ import {
   SlidersHorizontal,
   Layers, 
   MapPin, 
+  Globe,
   Info,
   CheckCircle2,
   ExternalLink,
@@ -60,9 +61,9 @@ export default function App() {
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [dismissedAnnouncements, setDismissedAnnouncements] = useState<string[]>([]);
 
-  // Cluster radius (Standard is locked to 50; Pro/Admin can select 50, 100, 150, 250 miles)
-  const [customRadius, setCustomRadius] = useState<number>(50);
-  const effectiveRadius = isPro ? customRadius : 50;
+  // Search Radius / Distance feature (0 = Unlimited / Global, 50, 100, 250 miles)
+  const [customRadius, setCustomRadius] = useState<number>(0);
+  const effectiveRadius = (customRadius === 0 || isPro) ? customRadius : 50;
 
   // Query state
   const [keyword, setKeyword] = useState("");
@@ -81,8 +82,8 @@ export default function App() {
   // Selected Category filter
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
 
-  // Selected Country filter
-  const [selectedCountry, setSelectedCountry] = useState<string>("UK"); // "All", "US", "UK"
+  // Location / Market filter (Replaces binary US/UK split; defaults to "All" for unified global view)
+  const [selectedLocation, setSelectedLocation] = useState<string>("All");
 
   // Selected Platform / Source filter
   const [selectedSource, setSelectedSource] = useState<string>("All"); // "All", "EasyLive", "BPI", "BidSpotter"
@@ -181,8 +182,8 @@ export default function App() {
       const itemEnd = new Date(item.endingDate).getTime();
       const matchesDate = isNaN(itemEnd) ? true : (itemEnd >= queryDate && itemEnd <= deadlineDate);
 
-      // 4. Country filter
-      const matchesCountry = selectedCountry === "All" || item.country === selectedCountry;
+      // 4. Location / Market filter (Non-binary global filtering)
+      const matchesLocation = !selectedLocation || selectedLocation === "All" || itemAddress.includes(selectedLocation.toLowerCase());
 
       // 5. Source Platform filter
       let matchesSource = true;
@@ -193,11 +194,13 @@ export default function App() {
         matchesSource = itemId.startsWith("bpilot") || itemAuctioneer.includes("bpi");
       } else if (selectedSource === "ATG") {
         matchesSource = itemId.startsWith("atg-") || itemAuctioneer.includes("bidspotter") || itemAuctioneer.includes("saleroom") || itemAuctioneer.includes("i-bidder");
+      } else if (selectedSource === "HiBid") {
+        matchesSource = itemId.startsWith("hibid") || itemId.startsWith("svd") || itemAuctioneer.includes("silicon valley") || itemAuctioneer.includes("hibid");
       }
 
-      return matchesKeyword && matchesCategory && matchesDate && matchesCountry && matchesSource;
+      return matchesKeyword && matchesCategory && matchesDate && matchesLocation && matchesSource;
     });
-  }, [listings, activeSearchTerm, selectedCategory, selectedCountry, selectedSource, queryTime, biddingDeadline]);
+  }, [listings, activeSearchTerm, selectedCategory, selectedLocation, selectedSource, queryTime, biddingDeadline]);
 
   // Compute regional clusters dynamically from filtered listings based on membership radius
   const computedClusters = useMemo(() => {
@@ -258,12 +261,15 @@ export default function App() {
     }, 1200);
  
     try {
+      const closingDateParam = biddingDeadline ? biddingDeadline.slice(0, 10) : "";
+      const searchBody = JSON.stringify({ keyword: searchKw.trim(), closingDate: closingDateParam });
+
       let response: Response;
       try {
         response = await fetch("/api/auctions/search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ keyword: searchKw.trim() })
+          body: searchBody
         });
       } catch {
         // Network connection hiccup, wait 2s and retry once
@@ -271,7 +277,7 @@ export default function App() {
         response = await fetch("/api/auctions/search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ keyword: searchKw.trim() })
+          body: searchBody
         });
       }
 
@@ -283,7 +289,7 @@ export default function App() {
         response = await fetch("/api/auctions/search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ keyword: searchKw.trim() })
+          body: searchBody
         });
         contentType = response.headers.get("content-type") || "";
       }
@@ -361,7 +367,7 @@ export default function App() {
       setSelectedCluster(cluster);
     } else {
       // Clear filters so the lot is visible
-      setSelectedCountry("All");
+      setSelectedLocation("All");
       setSelectedCategory("All");
       setActiveSearchTerm("");
       const target = listings.find((l) => l.id === item.lotId);
@@ -572,13 +578,14 @@ export default function App() {
               <h3 className="font-semibold text-slate-800 text-xs flex items-center gap-1.5 uppercase tracking-wider font-mono">
                 <SlidersHorizontal className="w-3.5 h-3.5 text-blue-600" /> Filtering Parameters
               </h3>
-              {(activeSearchTerm || selectedCategory !== "All" || selectedCountry !== "All") && (
+              {(activeSearchTerm || selectedCategory !== "All" || selectedLocation !== "All" || customRadius !== 0) && (
                 <button
                   onClick={() => {
                     setKeyword("");
                     setActiveSearchTerm("");
                     setSelectedCategory("All");
-                    setSelectedCountry("All");
+                    setSelectedLocation("All");
+                    setCustomRadius(0);
                     setSelectedCluster(null);
                   }}
                   className="text-[11px] text-blue-600 hover:text-blue-800 font-bold"
@@ -588,39 +595,53 @@ export default function App() {
               )}
             </div>
 
-            {/* Country Quick Filter Pills */}
+            {/* Location & Territory Filter (Non-binary global filtering) */}
             <div className="space-y-1.5">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 font-mono">
-                <MapPin className="w-3.5 h-3.5 text-slate-400" /> Country Focus
-              </span>
-              <div className="flex gap-2 pt-0.5 font-sans">
-                {["All", "US", "UK"].map((countryCode) => (
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 font-mono">
+                  <Globe className="w-3.5 h-3.5 text-blue-600" /> Market Location & Region
+                </span>
+                {selectedLocation !== "All" && (
                   <button
-                    key={countryCode}
                     onClick={() => {
-                      setSelectedCountry(countryCode);
-                      setSelectedCluster(null); // Clear selected region cluster
+                      setSelectedLocation("All");
+                      setSelectedCluster(null);
                     }}
-                    className={`flex-1 py-1.5 px-3 rounded text-xs font-bold transition-all cursor-pointer text-center ${
-                      selectedCountry === countryCode
-                        ? "bg-blue-600 text-white shadow-xs"
-                        : "bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-800"
-                    }`}
+                    className="text-[10px] text-blue-600 font-bold hover:underline"
                   >
-                    {countryCode === "All" ? "🌍 All Countries" : countryCode === "US" ? "🇺🇸 US" : "🇬🇧 UK"}
+                    Reset to Global
                   </button>
-                ))}
+                )}
+              </div>
+              <div className="relative">
+                <MapPin className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  value={selectedLocation === "All" ? "" : selectedLocation}
+                  onChange={(e) => {
+                    setSelectedLocation(e.target.value ? e.target.value : "All");
+                    setSelectedCluster(null);
+                  }}
+                  placeholder="Filter by city, state, or region (e.g. Nevada, California, Yorkshire, London)..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg py-1.5 pl-8 pr-24 text-xs focus:bg-white focus:border-blue-500 transition-colors outline-none"
+                />
+                {selectedLocation === "All" && (
+                  <span className="absolute right-2 top-1.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 pointer-events-none flex items-center gap-1">
+                    <Globe className="w-2.5 h-2.5" /> Worldwide
+                  </span>
+                )}
               </div>
             </div>
 
             {/* Auction Source / Connected API Selector */}
             <div className="space-y-1.5">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 font-mono">
-                <Layers className="w-3.5 h-3.5 text-slate-400" /> Live UK Source / Engine
+                <Layers className="w-3.5 h-3.5 text-slate-400" /> Live Auction Engine / Source
               </span>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-0.5 font-sans">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 pt-0.5 font-sans">
                 {[
                   { id: "All", label: "All APIs", icon: "⚡" },
+                  { id: "HiBid", label: "HiBid / SVD", icon: "🇺🇸" },
                   { id: "EasyLive", label: "Easy Live", icon: "🟢" },
                   { id: "BPI", label: "BPI / Artisio", icon: "🔵" },
                   { id: "ATG", label: "ATG Network", icon: "🟣" }
@@ -690,55 +711,57 @@ export default function App() {
               </div>
             </div>
 
-            {/* Regional Clustering Radius (Role-Based Scope) */}
+            {/* Search Radius & Distance Feature (with Unlimited Distance) */}
             <div className="space-y-1.5 pt-2 border-t border-slate-100">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 font-mono">
-                  <Compass className="w-3.5 h-3.5 text-blue-600" /> Regional Cluster Radius
+                  <Compass className="w-3.5 h-3.5 text-blue-600" /> Distance & Clustering Radius
                 </span>
-                {!isPro && (
-                  <button
-                    onClick={() => {
-                      setAuthModalTab("demo");
-                      setIsAuthModalOpen(true);
-                    }}
-                    className="text-[10px] text-purple-600 font-bold flex items-center gap-1 hover:underline cursor-pointer"
-                  >
-                    <Crown className="w-3 h-3 text-amber-500" /> Unlock 100-250 mi
-                  </button>
-                )}
-                {isPro && (
+                {effectiveRadius === 0 ? (
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
+                    <Sparkles className="w-2.5 h-2.5 text-emerald-600" /> Unlimited Distance
+                  </span>
+                ) : isPro ? (
                   <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
-                    ⭐ Pro Unlocked ({effectiveRadius} mi)
+                    ⭐ Pro Radius ({effectiveRadius} mi)
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                    {effectiveRadius} mi radius
                   </span>
                 )}
               </div>
-              <div className="flex gap-2 pt-0.5 font-sans">
-                {[50, 100, 150, 250].map((rad) => {
-                  const isAvailable = isPro || rad === 50;
-                  const isSelected = effectiveRadius === rad;
+              <div className="grid grid-cols-4 gap-1.5 pt-0.5 font-sans">
+                {[
+                  { value: 0, label: "∞ Unlimited", desc: "No distance restriction — view all lots worldwide" },
+                  { value: 50, label: "50 mi", desc: "50-mile local cluster radius" },
+                  { value: 100, label: "100 mi", desc: "100-mile regional cluster radius" },
+                  { value: 250, label: "250 mi", desc: "250-mile extended cluster radius" }
+                ].map((option) => {
+                  const isSelected = effectiveRadius === option.value;
+                  const isAvailable = isPro || option.value === 0 || option.value === 50;
                   return (
                     <button
-                      key={rad}
+                      key={option.value}
                       onClick={() => {
                         if (!isAvailable) {
                           setAuthModalTab("demo");
                           setIsAuthModalOpen(true);
                           return;
                         }
-                        setCustomRadius(rad);
+                        setCustomRadius(option.value);
                         setSelectedCluster(null);
                       }}
-                      className={`flex-1 py-1.5 px-2 rounded text-xs font-bold transition-all text-center ${
+                      className={`py-1.5 px-2 rounded text-xs font-bold transition-all text-center ${
                         isSelected
                           ? "bg-slate-900 text-white shadow-xs"
                           : isAvailable
                             ? "bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-800 cursor-pointer"
                             : "bg-slate-50 text-slate-400 cursor-pointer border border-dashed border-slate-200 hover:bg-purple-50 hover:text-purple-600"
                       }`}
-                      title={!isAvailable ? "Click to unlock Pro Membership" : `${rad} miles radius clustering`}
+                      title={!isAvailable ? "Click to unlock Pro Membership" : option.desc}
                     >
-                      {rad} mi {!isAvailable && "🔒"}
+                      {option.label} {!isAvailable && "🔒"}
                     </button>
                   );
                 })}
@@ -819,6 +842,11 @@ export default function App() {
               </div>
               {searchBreakdown && (
                 <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-800 text-[10px]">
+                  {searchBreakdown.hibidSvd != null && (
+                    <span className="bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded">
+                      HiBid (Global · Closing Date): {searchBreakdown.hibidSvd} lots
+                    </span>
+                  )}
                   <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded">
                     EasyLive: {searchBreakdown.easyLiveAuction ?? 0} lots
                   </span>
