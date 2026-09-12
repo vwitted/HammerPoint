@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { AuctionListing, AuctionCluster, SearchReference, WatchlistItem } from "./types";
 import { clusterListings } from "./utils/distance";
 import AuctionMap from "./components/AuctionMap";
@@ -90,10 +90,41 @@ export default function App() {
 
   // Loaded listings state
   const [listings, setListings] = useState<AuctionListing[]>([]);
-  const [searchBreakdown, setSearchBreakdown] = useState<{ easyLiveAuction?: number; bpiAuctions?: number; atgNetwork?: number } | null>(null);
+  const [searchBreakdown, setSearchBreakdown] = useState<{
+    liveAuctioneers?: number;
+    bidspotter?: number;
+    theSaleroom?: number;
+    easyLiveAuction?: number;
+    bpiAuctions?: number;
+    hibidSvd?: number;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamStatusMap, setStreamStatusMap] = useState<Record<string, { name: string; status: "searching" | "completed" | "error"; count?: number }>>({});
+  const eventSourceRef = useRef<EventSource | null>(null);
   const [scrapeStep, setScrapeStep] = useState("");
   const [scrapeError, setScrapeError] = useState<string | null>(null);
+
+  // Stop background streaming and clean up SSE connection
+  const stopStreaming = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    setIsStreaming(false);
+    setIsLoading(false);
+    setScrapeStep("");
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    };
+  }, []);
   
   // Selected map region cluster
   const [selectedCluster, setSelectedCluster] = useState<AuctionCluster | null>(null);
@@ -188,14 +219,19 @@ export default function App() {
       // 5. Source Platform filter
       let matchesSource = true;
       const itemId = safeStr(item.id);
-      if (selectedSource === "EasyLive") {
-        matchesSource = itemId.startsWith("easylive") || itemAuctioneer.includes("easy live");
+      const platform = safeStr(item.sourcePlatform);
+      if (selectedSource === "LiveAuctioneers") {
+        matchesSource = platform === "LiveAuctioneers" || itemId.startsWith("la-");
+      } else if (selectedSource === "BidSpotter") {
+        matchesSource = platform === "BidSpotter" || itemId.startsWith("bidspotter-") || itemAuctioneer.includes("bidspotter");
+      } else if (selectedSource === "TheSaleroom") {
+        matchesSource = platform === "The Saleroom" || itemId.startsWith("saleroom-") || itemAuctioneer.includes("the saleroom") || itemAuctioneer.includes("saleroom");
+      } else if (selectedSource === "EasyLive") {
+        matchesSource = platform === "Easy Live Auction" || itemId.startsWith("easylive") || itemAuctioneer.includes("easy live");
       } else if (selectedSource === "BPI") {
-        matchesSource = itemId.startsWith("bpilot") || itemAuctioneer.includes("bpi");
-      } else if (selectedSource === "ATG") {
-        matchesSource = itemId.startsWith("atg-") || itemAuctioneer.includes("bidspotter") || itemAuctioneer.includes("saleroom") || itemAuctioneer.includes("i-bidder");
+        matchesSource = platform === "BPI Auctions" || itemId.startsWith("bpilot") || itemAuctioneer.includes("bpi");
       } else if (selectedSource === "HiBid") {
-        matchesSource = itemId.startsWith("hibid") || itemId.startsWith("svd") || itemAuctioneer.includes("silicon valley") || itemAuctioneer.includes("hibid");
+        matchesSource = platform === "HiBid" || platform === "Silicon Valley Disposition" || itemId.startsWith("hibid") || itemId.startsWith("svd") || itemAuctioneer.includes("silicon valley") || itemAuctioneer.includes("hibid");
       }
 
       return matchesKeyword && matchesCategory && matchesDate && matchesLocation && matchesSource;
@@ -230,120 +266,149 @@ export default function App() {
     });
   }, [filteredListings, selectedCluster]);
 
-  // Handle live scraping via Gemini Google Search grounding
+  // Handle progressive live scraping via Server-Sent Events (SSE)
   const handleScrape = async (overrideKeyword: string) => {
     const searchKw = typeof overrideKeyword === 'string' ? overrideKeyword : keyword;
     if (!searchKw.trim()) return;
- 
+
+    // Terminate any active stream before starting a new one
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
     setIsLoading(true);
-    setScrapeStep("Initializing scrape...");
+    setIsStreaming(true);
+    setScrapeStep("Connecting to real-time auction scraper streams...");
     setScrapeError(null);
-    
-    // Set active search term on client so lists filter immediately
+    setSearchBreakdown({});
+    setStreamStatusMap({
+      liveAuctioneers: { name: "LiveAuctioneers", status: "searching" },
+      easyLiveAuction: { name: "Easy Live Auction", status: "searching" },
+      bpiAuctions: { name: "BPI Auctions", status: "searching" },
+      hibidSvd: { name: "HiBid / SVD", status: "searching" },
+      bidspotter: { name: "BidSpotter", status: "searching" },
+      theSaleroom: { name: "The Saleroom", status: "searching" }
+    });
+
+    // Set active search term on client so lists and clusters filter immediately
     setActiveSearchTerm(searchKw.trim());
-    setSelectedCluster(null); // Clear selected region to show everything matching new search
- 
-    // Visual sequence of comforting loading steps
-    const steps = [
-      "Connecting to Easy Live Auction Algolia Search API (130k+ lots)...",
-      "Querying BPI Auctions via Artisio REST API with compliant headers...",
-      "Executing ATG Media Network crawler (BidSpotter, The Saleroom, i-bidder)...",
-      "Extracting physical asset locations and geocoding coordinates across UK regions...",
-      "Aggregating real lots and calculating bidding deadlines..."
-    ];
- 
-    let stepIndex = 0;
-    const interval = setInterval(() => {
-      if (stepIndex < steps.length) {
-        setScrapeStep(steps[stepIndex]);
-        stepIndex++;
-      }
-    }, 1200);
- 
+    setSelectedCluster(null);
+
+    const closingDateParam = biddingDeadline ? biddingDeadline.slice(0, 10) : "";
+    const streamUrl = `/api/auctions/search-stream?keyword=${encodeURIComponent(searchKw.trim())}&closingDate=${encodeURIComponent(closingDateParam)}`;
+
     try {
-      const closingDateParam = biddingDeadline ? biddingDeadline.slice(0, 10) : "";
-      const searchBody = JSON.stringify({ keyword: searchKw.trim(), closingDate: closingDateParam });
+      const es = new EventSource(streamUrl);
+      eventSourceRef.current = es;
 
-      let response: Response;
-      try {
-        response = await fetch("/api/auctions/search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: searchBody
-        });
-      } catch {
-        // Network connection hiccup, wait 2s and retry once
-        await new Promise((r) => setTimeout(r, 2000));
-        response = await fetch("/api/auctions/search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: searchBody
-        });
-      }
-
-      // Check if response is HTML (e.g. 502/503/504 warmup page)
-      let contentType = response.headers.get("content-type") || "";
-      if (!response.ok || !contentType.includes("application/json")) {
-        // Server may be initializing; wait 2.5s and retry once
-        await new Promise((r) => setTimeout(r, 2500));
-        response = await fetch("/api/auctions/search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: searchBody
-        });
-        contentType = response.headers.get("content-type") || "";
-      }
-
-      if (!response.ok || !contentType.includes("application/json")) {
-        const text = await response.text();
-        if (text.includes("warmup") || text.startsWith("<!doctype") || [502, 503, 504].includes(response.status)) {
-          throw new Error("The search service is currently initializing. Please try your search again in a moment.");
-        }
-        throw new Error(`The search service returned status ${response.status}. Please try again.`);
-      }
-
-      const payload = await response.json();
-
-      if (payload.status === "success") {
-        if (payload.breakdown) {
-          setSearchBreakdown(payload.breakdown);
-        }
-        // Fetch all in-memory auctions which now include the freshly scraped ones!
+      es.addEventListener("init", (e) => {
         try {
-          const allRes = await fetch("/api/auctions");
-          const allCtype = allRes.headers.get("content-type") || "";
-          if (allRes.ok && allCtype.includes("application/json")) {
-            const allPayload = await allRes.json();
-            if (allPayload.status === "success" && Array.isArray(allPayload.data)) {
-              setListings(allPayload.data);
-            } else if (Array.isArray(payload.data)) {
-              setListings(payload.data);
-            }
-          } else if (Array.isArray(payload.data)) {
-            setListings(payload.data);
+          const data = JSON.parse(e.data);
+          if (Array.isArray(data.references)) {
+            setSourceReferences(data.references);
           }
-        } catch {
-          if (Array.isArray(payload.data)) {
-            setListings(payload.data);
-          }
+        } catch (err) {
+          console.error("Failed parsing init event:", err);
         }
+      });
 
-        if (payload.references) {
-          setSourceReferences(payload.references);
+      es.addEventListener("provider_status", (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          setStreamStatusMap((prev) => ({
+            ...prev,
+            [data.provider]: { name: data.name, status: "searching" }
+          }));
+          setScrapeStep(`Querying ${data.name}...`);
+        } catch (err) {
+          console.error("Failed parsing provider_status event:", err);
         }
-      } else {
-        setScrapeError(payload.error || "A web-scraping error occurred.");
-        if (payload.references) {
-          setSourceReferences(payload.references);
+      });
+
+      es.addEventListener("provider_results", (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          setStreamStatusMap((prev) => ({
+            ...prev,
+            [data.provider]: {
+              name: data.name,
+              status: data.status,
+              count: data.count
+            }
+          }));
+
+          if (Array.isArray(data.lots) && data.lots.length > 0) {
+            setListings((prev) => {
+              const existingIds = new Set(prev.map((item) => item.id));
+              const uniqueNewLots = data.lots.filter((item: AuctionListing) => !existingIds.has(item.id));
+              return [...prev, ...uniqueNewLots];
+            });
+          }
+
+          setSearchBreakdown((prev) => ({
+            ...prev,
+            [data.provider]: (prev?.[data.provider as keyof typeof prev] || 0) + (data.count || 0)
+          }));
+
+          // Dismiss blocking loading state the instant any results arrive,
+          // allowing the user to browse, click, and inspect immediately!
+          setIsLoading(false);
+          setScrapeStep(`${data.name} returned ${data.count} lots`);
+        } catch (err) {
+          console.error("Failed parsing provider_results event:", err);
         }
-      }
+      });
+
+      es.addEventListener("complete", (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (Array.isArray(data.references)) {
+            setSourceReferences(data.references);
+          }
+        } catch (err) {
+          console.error("Failed parsing complete event:", err);
+        }
+        setIsStreaming(false);
+        setIsLoading(false);
+        setScrapeStep("");
+        es.close();
+        eventSourceRef.current = null;
+      });
+
+      es.onerror = () => {
+        // Stream completed, disconnected, or closed
+        setIsStreaming(false);
+        setIsLoading(false);
+        setScrapeStep("");
+        es.close();
+        eventSourceRef.current = null;
+      };
     } catch (err: any) {
-      console.error("Scrape error:", err);
-      setScrapeError(err?.message || "A network or server error occurred during web search.");
-    } finally {
-      clearInterval(interval);
-      setIsLoading(false);
-      setScrapeStep("");
+      console.error("EventSource failed, attempting fallback POST:", err);
+      try {
+        const fallbackRes = await fetch("/api/auctions/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keyword: searchKw.trim(), closingDate: closingDateParam })
+        });
+        const fallbackData = await fallbackRes.json();
+        if (fallbackData.status === "success" && Array.isArray(fallbackData.data)) {
+          setListings((prev) => {
+            const existingIds = new Set(prev.map((item) => item.id));
+            const unique = fallbackData.data.filter((item: AuctionListing) => !existingIds.has(item.id));
+            return [...prev, ...unique];
+          });
+          if (fallbackData.breakdown) setSearchBreakdown(fallbackData.breakdown);
+          if (fallbackData.references) setSourceReferences(fallbackData.references);
+        }
+      } catch (fallbackErr: any) {
+        setScrapeError(fallbackErr.message || "Failed to query live auction catalogs.");
+      } finally {
+        setIsLoading(false);
+        setIsStreaming(false);
+        setScrapeStep("");
+      }
     }
   };
 
@@ -428,11 +493,28 @@ export default function App() {
           </div>
           <button 
             type="submit"
-            disabled={isLoading || !keyword.trim()}
-            className="bg-blue-600 text-white px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 transition-colors shrink-0 cursor-pointer shadow-xs"
+            disabled={!keyword.trim()}
+            className="bg-blue-600 text-white px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 transition-colors shrink-0 cursor-pointer shadow-xs flex items-center gap-1.5"
           >
-            Scrape Web
+            {isStreaming ? (
+              <>
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Streaming...</span>
+              </>
+            ) : (
+              <span>Scrape Web</span>
+            )}
           </button>
+          {isStreaming && (
+            <button
+              type="button"
+              onClick={stopStreaming}
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer border border-slate-200 shrink-0"
+              title="Stop active background scrapers"
+            >
+              Stop
+            </button>
+          )}
         </form>
 
         {/* Right Actions & Role-Based Navigation */}
@@ -638,13 +720,15 @@ export default function App() {
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 font-mono">
                 <Layers className="w-3.5 h-3.5 text-slate-400" /> Live Auction Engine / Source
               </span>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 pt-0.5 font-sans">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-1.5 pt-0.5 font-sans">
                 {[
-                  { id: "All", label: "All APIs", icon: "⚡" },
-                  { id: "HiBid", label: "HiBid / SVD", icon: "🇺🇸" },
+                  { id: "All", label: "All Sites", icon: "⚡" },
+                  { id: "LiveAuctioneers", label: "LiveAuctioneers", icon: "🔴" },
+                  { id: "BidSpotter", label: "BidSpotter", icon: "🔵" },
+                  { id: "TheSaleroom", label: "The Saleroom", icon: "🟣" },
                   { id: "EasyLive", label: "Easy Live", icon: "🟢" },
-                  { id: "BPI", label: "BPI / Artisio", icon: "🔵" },
-                  { id: "ATG", label: "ATG Network", icon: "🟣" }
+                  { id: "BPI", label: "BPI Auctions", icon: "🔷" },
+                  { id: "HiBid", label: "HiBid / SVD", icon: "🇺🇸" }
                 ].map((src) => (
                   <button
                     key={src.id}
@@ -769,9 +853,9 @@ export default function App() {
             </div>
           </div>
 
-          {/* Scrape / Status Banner */}
+          {/* Scrape / Status Banner (Initial Connecting) */}
           <AnimatePresence mode="wait">
-            {isLoading && (
+            {isLoading && filteredListings.length === 0 && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
@@ -781,12 +865,62 @@ export default function App() {
                 <RefreshCw className="w-5 h-5 text-blue-400 animate-spin shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-bold font-mono text-blue-400 uppercase tracking-wider animate-pulse">
-                    Web Scraping Engine Active
+                    Connecting Real-Time Auction Streams
                   </p>
                   <p className="text-[11px] text-slate-300 mt-1 truncate">
-                    {scrapeStep}
+                    {scrapeStep || "Querying auction catalogs worldwide..."}
                   </p>
                 </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Progressive Streaming Active Banner (While browsing) */}
+          <AnimatePresence>
+            {isStreaming && (
+              <motion.div
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -5 }}
+                className="bg-slate-900 text-white p-3.5 rounded-xl border border-blue-900/60 shadow-md space-y-2.5"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                    </span>
+                    <span className="font-bold text-xs text-blue-300">
+                      Asynchronous Scraper Active ({filteredListings.length} lots loaded)
+                    </span>
+                  </div>
+                  <button
+                    onClick={stopStreaming}
+                    className="px-2 py-0.5 text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded border border-slate-700 cursor-pointer transition-colors"
+                  >
+                    Done / Stop
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1 text-[10px]">
+                  {(Object.entries(streamStatusMap) as [string, { name: string; status: "searching" | "completed" | "error"; count?: number }][]).map(([key, item]) => (
+                    <span
+                      key={key}
+                      className={`px-1.5 py-0.5 rounded font-mono flex items-center gap-1 ${
+                        item.status === "completed"
+                          ? "bg-emerald-950/90 text-emerald-300 border border-emerald-800/80"
+                          : item.status === "searching"
+                            ? "bg-blue-950/90 text-blue-300 border border-blue-800/80 animate-pulse"
+                            : "bg-red-950/90 text-red-300 border border-red-800/80"
+                      }`}
+                    >
+                      <span>{item.status === "completed" ? "✓" : item.status === "searching" ? "⏳" : "✕"}</span>
+                      <span>{item.name}{item.count != null ? ` (${item.count})` : ""}</span>
+                    </span>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-300 leading-snug">
+                  You can freely browse, filter, or inspect listings right now while background scrapers finish.
+                </p>
               </motion.div>
             )}
           </AnimatePresence>
@@ -842,20 +976,32 @@ export default function App() {
               </div>
               {searchBreakdown && (
                 <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-800 text-[10px]">
-                  {searchBreakdown.hibidSvd != null && (
-                    <span className="bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded">
-                      HiBid (Global · Closing Date): {searchBreakdown.hibidSvd} lots
+                  {searchBreakdown.liveAuctioneers != null && (
+                    <span className="bg-rose-950 text-rose-300 border border-rose-800 px-2 py-0.5 rounded font-mono">
+                      LiveAuctioneers: {searchBreakdown.liveAuctioneers} lots
                     </span>
                   )}
-                  <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded">
+                  {searchBreakdown.bidspotter != null && (
+                    <span className="bg-sky-950 text-sky-300 border border-sky-800 px-2 py-0.5 rounded font-mono">
+                      BidSpotter: {searchBreakdown.bidspotter} lots
+                    </span>
+                  )}
+                  {searchBreakdown.theSaleroom != null && (
+                    <span className="bg-purple-950 text-purple-300 border border-purple-800 px-2 py-0.5 rounded font-mono">
+                      The Saleroom: {searchBreakdown.theSaleroom} lots
+                    </span>
+                  )}
+                  <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded font-mono">
                     EasyLive: {searchBreakdown.easyLiveAuction ?? 0} lots
                   </span>
-                  <span className="bg-blue-950 text-blue-300 border border-blue-800 px-2 py-0.5 rounded">
-                    BPI / Artisio: {searchBreakdown.bpiAuctions ?? 0} lots
+                  <span className="bg-blue-950 text-blue-300 border border-blue-800 px-2 py-0.5 rounded font-mono">
+                    BPI Auctions: {searchBreakdown.bpiAuctions ?? 0} lots
                   </span>
-                  <span className="bg-purple-950 text-purple-300 border border-purple-800 px-2 py-0.5 rounded">
-                    ATG Network: {searchBreakdown.atgNetwork ?? 0} lots
-                  </span>
+                  {searchBreakdown.hibidSvd != null && (
+                    <span className="bg-amber-950 text-amber-300 border border-amber-800 px-2 py-0.5 rounded font-mono">
+                      HiBid / SVD: {searchBreakdown.hibidSvd} lots
+                    </span>
+                  )}
                 </div>
               )}
             </div>

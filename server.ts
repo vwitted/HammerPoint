@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import puppeteer from "puppeteer";
+import crypto from "crypto";
 
 dotenv.config();
 
@@ -140,166 +141,375 @@ async function scrapeBpiHomepageEvents(): Promise<BpiAuctionEvent[]> {
   }
 }
 
-// ATG Network scraper (BidSpotter UK, i-bidder, and The Saleroom) via Puppeteer
-// In environments with full Chromium installed (e.g. self-hosted, VPS, desktop), this crawls matching lots directly.
-// In container environments where Chromium is unavailable or Cloudflare challenge triggers, it fails safely without blocking other sources.
-async function scrapeBidspotterLots(keyword: string): Promise<any[]> {
-  let browser: any = null;
+// High-performance search for The Saleroom via Algolia InstantSearch API with Puppeteer fallback
+export async function scrapeTheSaleroomLots(keyword: string): Promise<any[]> {
+  const appId = '2125HT9M59';
+  const apiKey = 'b1f48e75f522cc67ff7751f1abd75458';
+  const url = `https://${appId}-dsn.algolia.net/1/indexes/lots_sr_en/query`;
+  const now = Date.now();
+
+  const doAlgoliaQuery = async (numericFilters?: string[]) => {
+    const body: any = {
+      params: new URLSearchParams({
+        query: keyword,
+        hitsPerPage: '40',
+        page: '0',
+        facetFilters: JSON.stringify(['privatePlatformCodes:-SR']),
+        ...(numericFilters ? { numericFilters: JSON.stringify(numericFilters) } : {})
+      }).toString()
+    };
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Algolia-Application-Id': appId,
+        'X-Algolia-API-Key': apiKey
+      },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error(`Algolia query status: ${res.status}`);
+    return await res.json();
+  };
+
   try {
-    browser = await puppeteer.launch({
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--single-process',
-        '--disable-gpu',
-        '--no-zygote'
-      ],
-      headless: true
-    });
-    
-    const atgSites = [
-      { baseUrl: 'https://www.bidspotter.co.uk', name: 'BidSpotter UK', suffix: '/en-gb/search-results?searchTerm=' },
-      { baseUrl: 'https://www.i-bidder.com', name: 'i-bidder', suffix: '/en-gb/search-results?searchTerm=' },
-      { baseUrl: 'https://www.the-saleroom.com', name: 'The Saleroom', suffix: '/en-gb/search-results?searchTerm=' }
-    ];
+    // 1. Try querying active/live lots first
+    let data = await doAlgoliaQuery([`auctionEndDateTimeUtc>=${now}`]);
+    let hits = data.hits || [];
 
-    let allItemsRaw: any[] = [];
-
-    for (const site of atgSites) {
-      let page: any = null;
-      try {
-        page = await browser.newPage();
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        const searchUrl = `${site.baseUrl}${site.suffix}${encodeURIComponent(keyword)}`;
-        
-        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 8000 });
-        await page.waitForSelector('.lot-title', { timeout: 4000 }).catch(() => {});
-        
-        const items = await page.evaluate((kw: string, siteBaseUrl: string, siteName: string) => {
-          const lotTitles = Array.from(document.querySelectorAll('.lot-title'));
-          return lotTitles.map(el => {
-            const container = el.closest('div[class*="search-result"]') || el.closest('div[class*="lot-card"]') || el.closest('article') || el.parentElement?.parentElement?.parentElement;
-            if (!container) return null;
-            
-            // Extract accurate image, handling data-src / lazy-load
-            const img = container.querySelector('img');
-            let imgUrl = "";
-            if (img) {
-              imgUrl = img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-original') || img.src || "";
-              if (imgUrl.startsWith("//")) imgUrl = "https:" + imgUrl;
-            }
-
-            const location = container.querySelector('[class*="location"]');
-            const containerText = container.textContent || "";
-            
-            // Date regex
-            const dateStrMatch = containerText.match(/(?:Bidding ends|Ends in|Closing|Bidding opens|Sale date):?\s*([^\n\r<]+)/i);
-
-            // Pricing regexes for ATG / BidSpotter
-            const openingBidMatch = containerText.match(/(?:opening bid|starts? at|starting bid|starting price):?\s*(?:£|GBP)?\s*([\d,]+)/i) 
-              || containerText.match(/\(opening bid\s+([\d,]+)\s*(?:GBP|£)?\)/i);
-            
-            const currentBidMatch = containerText.match(/(?:current bid|last bid):?\s*(?:£|GBP)?\s*([\d,]+)/i);
-            const estMatch = containerText.match(/(?:estimate|est\.?):?\s*(?:£|GBP)?\s*([\d,]+)(?:\s*-\s*(?:£|GBP)?\s*([\d,]+))?/i);
-            const reserveMatch = containerText.match(/reserve(?:\s+price)?:?\s*(?:£|GBP)?\s*([\d,]+)/i);
-
-            const parseNum = (m: any) => m ? parseInt(m[1].replace(/,/g, ""), 10) : null;
-            const openingBid = parseNum(openingBidMatch);
-            const currentBid = parseNum(currentBidMatch);
-            const lowEst = estMatch ? parseInt(estMatch[1].replace(/,/g, ""), 10) : null;
-            const highEst = (estMatch && estMatch[2]) ? parseInt(estMatch[2].replace(/,/g, ""), 10) : null;
-            const reservePrice = parseNum(reserveMatch);
-
-            return {
-              title: el.textContent?.trim() || "",
-              url: el.parentElement?.getAttribute('href') || el.closest('a')?.href || "",
-              imageUrl: imgUrl,
-              location: location ? location.textContent?.trim() : "",
-              dateStr: dateStrMatch ? dateStrMatch[1] : "",
-              openingBid: openingBid,
-              currentBid: currentBid,
-              lowEst: lowEst,
-              highEst: highEst,
-              reservePrice: reservePrice,
-              sourceName: siteName,
-              sourceBaseUrl: siteBaseUrl
-            };
-          }).filter((item: any) => {
-            if (!item) return false;
-            const lowerTitle = item.title.toLowerCase();
-            const words = kw.toLowerCase().split(" ").filter((w: string) => w.trim() !== "");
-            return words.every((term: string) => lowerTitle.includes(term));
-          }).slice(0, 10);
-        }, keyword, site.baseUrl, site.name);
-        
-        allItemsRaw.push(...items);
-      } catch (siteErr: any) {
-        // Individual site timeout or challenge
-      } finally {
-        if (page) await page.close().catch(() => {});
-      }
+    // If 0 live hits, search without numeric date restriction
+    if (hits.length === 0) {
+      data = await doAlgoliaQuery();
+      hits = data.hits || [];
     }
-    
-    // Deduplicate by title
-    const titleSet = new Set();
-    const allItems = allItemsRaw.filter(item => {
-      const isDuplicate = titleSet.has(item.title);
-      titleSet.add(item.title);
-      return !isDuplicate;
-    });
-    
-    const currentYear = new Date().getFullYear();
 
-    return allItems.map((item: any, i: number) => {
-      const exactCoords = getCoordinatesForLocation(item.location || "London");
-      let absoluteUrl = item.url;
-      if (absoluteUrl && absoluteUrl.startsWith('/')) {
-        absoluteUrl = item.sourceBaseUrl + absoluteUrl;
-      } else if (!absoluteUrl) {
-        absoluteUrl = `${item.sourceBaseUrl}/en-gb/search-results?searchTerm=${encodeURIComponent(keyword)}`;
-      }
-      
-      let cleanedLoc = item.location || "United Kingdom";
-      if (cleanedLoc.includes("United Kingdom")) {
-        const parts = cleanedLoc.split('\n');
-        cleanedLoc = parts[0]?.trim() || "United Kingdom";
+    if (hits.length > 0) {
+      return hits.map((h: any, i: number) => {
+        const sym = h.currency === 'USD' ? '$' : (h.currency === 'EUR' ? '€' : '£');
+        const startPrice = (h.nextBid && h.nextBid > 0) ? h.nextBid : (h.lowEstimate && h.lowEstimate > 0 ? h.lowEstimate : null);
+        const currentPrice = (h.lastBid && h.lastBid > 0) ? h.lastBid : startPrice;
+        let estimateStr: string | undefined = undefined;
+        if (h.lowEstimate && h.highEstimate) {
+          estimateStr = `${sym}${h.lowEstimate} - ${sym}${h.highEstimate}`;
+        } else if (h.lowEstimate) {
+          estimateStr = `${sym}${h.lowEstimate}`;
+        }
+
+        const auctioneer = h.auctioneerName || 'The Saleroom';
+        const lotUrl = `https://www.the-saleroom.com/en-gb/auction-catalogues/${h.auctioneerRef || 'auctioneer'}/catalogue-id-${h.auctionRef || 'auction'}/lot-${h.objectID}`;
+
+        return {
+          id: `saleroom-${h.objectID || `${Date.now()}-${i}`}`,
+          title: h.title || `Lot #${h.lotNumber || i + 1}`,
+          url: lotUrl,
+          details: h.description ? h.description.replace(/<[^>]*>/g, '').trim().slice(0, 300) : `Lot #${h.lotNumber || ''} from ${auctioneer}`,
+          endingDate: h.auctionEndDateTimeUtc ? new Date(h.auctionEndDateTimeUtc).toISOString() : new Date(Date.now() + 4 * 86400000).toISOString(),
+          startDate: h.auctionStartDateTimeUtc ? new Date(h.auctionStartDateTimeUtc).toISOString() : new Date().toISOString(),
+          address: h.countryName || 'United Kingdom',
+          latitude: h._geoloc?.lat || 51.5074,
+          longitude: h._geoloc?.lng || -0.1278,
+          auctioneer,
+          category: h.masterCategoryName || 'Art & Antiques',
+          country: h.countryCode || 'UK',
+          currency: sym,
+          currentPrice: currentPrice != null ? currentPrice : null,
+          startPrice: startPrice != null ? startPrice : null,
+          estimateStr,
+          imageUrl: h.imageUrl || 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&q=80',
+          status: 'active',
+          sourcePlatform: 'The Saleroom'
+        };
+      });
+    }
+  } catch (err: any) {
+    console.warn('[The Saleroom] Algolia failed, falling back to Puppeteer:', err.message);
+  }
+
+  // Fallback to Puppeteer for The Saleroom if Algolia query yields 0 or fails
+  return await scrapeAtgPlatformLots('https://www.the-saleroom.com', 'The Saleroom', 'saleroom', keyword);
+}
+
+// Dedicated BidSpotter UK scraper via Puppeteer
+export async function scrapeBidspotterLots(keyword: string): Promise<any[]> {
+  return await scrapeAtgPlatformLots('https://www.bidspotter.co.uk', 'BidSpotter', 'bidspotter', keyword);
+}
+
+// Robust ATG Network browser scraper (used for BidSpotter and as fallback for The Saleroom)
+async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, idPrefix: string, keyword: string): Promise<any[]> {
+  let browser: any = null;
+  const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 22000));
+
+  const scrapeTask = (async () => {
+    try {
+      browser = await puppeteer.launch({
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--single-process',
+          '--disable-gpu',
+          '--no-zygote'
+        ],
+        headless: true
+      });
+
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1280, height: 800 });
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
+      await page.setExtraHTTPHeaders({
+        'accept-language': 'en-GB,en;q=0.9',
+        'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"'
+      });
+
+      const searchUrl = `${baseUrl}/en-gb/search-results?searchTerm=${encodeURIComponent(keyword)}`;
+      try {
+        await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 20000 });
+      } catch {
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 6000 }).catch(() => {});
       }
 
-      let parsedDate = "";
-      if (item.dateStr) {
-        const rawDate = item.dateStr.split('\n')[0].replace(/^from\s+/i, "").replace(/BST|GMT/gi, "").trim();
-        const relDayMatch = rawDate.match(/(\d+)\s*d(?:ays?)?/i);
-        const relHourMatch = rawDate.match(/(\d+)\s*h(?:ours?)?/i);
-        if (relDayMatch || relHourMatch) {
-          const days = relDayMatch ? parseInt(relDayMatch[1], 10) : 0;
-          const hours = relHourMatch ? parseInt(relHourMatch[1], 10) : 0;
-          parsedDate = new Date(Date.now() + days * 86400000 + hours * 3600000).toISOString();
-        } else {
-          const cleanDate = rawDate.replace(/^on\s+/i, "").trim();
-          const withYear = /\b20\d\d\b/.test(cleanDate) ? cleanDate : `${cleanDate} ${currentYear}`;
-          const d = new Date(withYear);
-          if (!isNaN(d.getTime())) {
-            parsedDate = d.toISOString();
+      // Retry evaluate in case AWS WAF challenge completes a post-navigation step
+      let rawLots: any[] = [];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          await page.waitForSelector('article.panel.item, .lot-single, [class*="lot-single"]', { timeout: 8000 }).catch(() => {});
+
+          rawLots = await page.evaluate(`(() => {
+            const cards = Array.from(document.querySelectorAll('article.panel.item, .lot-single, [class*="lot-single"]'));
+            const seen = new Set();
+            const results = [];
+
+            for (const card of cards) {
+              const linkEl = card.querySelector('a[href*="/lot-"]') || card.querySelector('a[href*="/auction-catalogues/"]');
+              const href = linkEl ? linkEl.href : '';
+              if (!href || href.startsWith('#') || seen.has(href)) continue;
+              seen.add(href);
+
+              const titleEl = card.querySelector('.lot-title, h3 a, h3, h2');
+              let title = titleEl ? titleEl.textContent.replace(/\\s+/g, ' ').trim() : '';
+              if (!title || title.toLowerCase() === 'no image' || title.toLowerCase() === 'view' || title.toLowerCase().includes('top search')) {
+                const img = card.querySelector('img[alt]:not([alt="No Image"]):not([alt="Loading..."])');
+                if (img) title = img.getAttribute('alt') || '';
+              }
+              title = title.replace(/setTimeout\\([^)]*\\);?/gi, '').replace(/<[^>]*>/g, '').trim();
+              if (!title || title.length < 2) continue;
+
+              const numEl = card.querySelector('.lot-number, .number');
+              const lotNumber = numEl ? numEl.textContent.replace(/lot/i, '').trim() : '';
+
+              const sellerEl = card.querySelector('.byline a, [data-click-type="client"], .client-url a');
+              const auctioneer = sellerEl ? sellerEl.textContent.replace(/\\s+/g, ' ').trim() : '';
+
+              const descEl = card.querySelector('.description');
+              const description = descEl ? descEl.textContent.replace(/\\s+/g, ' ').trim() : '';
+
+              // Image extraction
+              let imageUrl = '';
+              const imgEl = card.querySelector('img[src*="globalauctionplatform.com"], img[src*="azureedge.net"], .thumb img:not([src*="blank-image"]):not([src*="ajax-loader"]), img[id^="i"]');
+              if (imgEl) {
+                imageUrl = imgEl.src || imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || '';
+              }
+              if (!imageUrl) {
+                const noscript = card.querySelector('noscript');
+                if (noscript) {
+                  const m = noscript.innerHTML.match(/src="([^"]+)"/);
+                  if (m) imageUrl = m[1];
+                }
+              }
+              if (imageUrl && imageUrl.startsWith('//')) imageUrl = 'https:' + imageUrl;
+
+              // Pricing
+              const openingEl = card.querySelector('.opening-price, [id^="openingPrice-"]');
+              const currentEl = card.querySelector('.current-price, [id^="price-"]');
+              const estEl = card.querySelector('.estimate');
+
+              let openingBid = null;
+              if (openingEl) {
+                const m = (openingEl.textContent || '').match(/[\\d,.]+/);
+                if (m) openingBid = parseFloat(m[0].replace(/,/g, ''));
+              }
+
+              let currentBid = null;
+              if (currentEl) {
+                const m = (currentEl.textContent || '').match(/[\\d,.]+/);
+                if (m) currentBid = parseFloat(m[0].replace(/,/g, ''));
+              }
+
+              let lowEst = null;
+              let highEst = null;
+              let estimateStr = null;
+
+              if (estEl) {
+                const nums = (estEl.textContent || '').match(/[\\d,.]+/g);
+                if (nums && nums.length >= 2) {
+                  lowEst = parseFloat(nums[0].replace(/,/g, ''));
+                  highEst = parseFloat(nums[1].replace(/,/g, ''));
+                  estimateStr = '£' + lowEst + ' - £' + highEst;
+                } else if (nums && nums.length === 1) {
+                  lowEst = parseFloat(nums[0].replace(/,/g, ''));
+                  estimateStr = '£' + lowEst;
+                }
+              }
+
+              const rawCurrency = card.getAttribute('data-currency') || '';
+              const currency = rawCurrency === 'USD' ? '$' : (rawCurrency === 'EUR' ? '€' : '£');
+
+              results.push({
+                lotNumber: lotNumber,
+                title: title,
+                description: description,
+                url: href,
+                imageUrl: imageUrl,
+                auctioneer: auctioneer,
+                openingBid: openingBid,
+                currentBid: currentBid,
+                estimateStr: estimateStr,
+                currency: currency
+              });
+
+              if (results.length >= 35) break;
+            }
+            return results;
+          })()`);
+
+          if (rawLots && rawLots.length > 0) break;
+        } catch (evalErr: any) {
+          if (evalErr.message && evalErr.message.includes('Execution context was destroyed')) {
+            await new Promise(r => setTimeout(r, 1500));
+            continue;
           }
+          break;
         }
       }
-      if (!parsedDate) {
-        parsedDate = new Date(Date.now() + 4 * 86400000).toISOString();
-      }
 
-      const openingBid = item.openingBid || (item.lowEst ? item.lowEst : null);
-      const effectiveBid = item.currentBid || openingBid;
-      const reserve = (item.reservePrice && openingBid && item.reservePrice > openingBid) ? item.reservePrice : null;
-      let estimateStr = undefined;
-      if (item.lowEst && item.highEst) {
-        estimateStr = `£${item.lowEst} - £${item.highEst}`;
-      } else if (item.lowEst) {
-        estimateStr = `£${item.lowEst}`;
+      return (rawLots || []).map((item: any, i: number) => {
+        const exactCoords = getCoordinatesForLocation('United Kingdom');
+        const effectiveStart = item.openingBid != null ? item.openingBid : null;
+        const effectiveBid = item.currentBid != null ? item.currentBid : effectiveStart;
+
+        let category = 'General';
+        const lowerTitle = item.title.toLowerCase();
+        if (lowerTitle.includes('lathe') || lowerTitle.includes('milling') || lowerTitle.includes('cnc') || lowerTitle.includes('machinery') || lowerTitle.includes('generator') || lowerTitle.includes('press') || lowerTitle.includes('welder')) {
+          category = 'Machinery';
+        } else if (lowerTitle.includes('catering') || lowerTitle.includes('oven') || lowerTitle.includes('freezer') || lowerTitle.includes('fryer') || lowerTitle.includes('restaurant')) {
+          category = 'Catering';
+        } else if (lowerTitle.includes('car') || lowerTitle.includes('van') || lowerTitle.includes('truck') || lowerTitle.includes('trailer') || lowerTitle.includes('vehicle') || lowerTitle.includes('tractor')) {
+          category = 'Vehicles';
+        } else if (lowerTitle.includes('furniture') || lowerTitle.includes('table') || lowerTitle.includes('chair') || lowerTitle.includes('desk') || lowerTitle.includes('cabinet') || lowerTitle.includes('sofa')) {
+          category = 'Furniture';
+        } else if (lowerTitle.includes('laptop') || lowerTitle.includes('computer') || lowerTitle.includes('screen') || lowerTitle.includes('tech') || lowerTitle.includes('electronics') || lowerTitle.includes('phone')) {
+          category = 'Electronics';
+        } else {
+          category = 'Industrial';
+        }
+
+        const auctioneer = item.auctioneer || siteName;
+
+        return {
+          id: `${idPrefix}-${Date.now()}-${i}`,
+          title: item.title,
+          url: item.url,
+          details: item.description || `Lot ${item.lotNumber ? '#' + item.lotNumber : ''} from ${auctioneer}.${item.estimateStr ? ` Estimate: ${item.estimateStr}.` : ''}${effectiveStart ? ` Starting bid: ${item.currency}${effectiveStart}.` : ''}`,
+          endingDate: new Date(Date.now() + 4 * 86400000).toISOString(),
+          startDate: new Date().toISOString(),
+          address: 'United Kingdom',
+          latitude: exactCoords.latitude,
+          longitude: exactCoords.longitude,
+          auctioneer,
+          category,
+          country: 'UK',
+          currency: item.currency || '£',
+          currentPrice: effectiveBid,
+          startPrice: effectiveStart,
+          estimateStr: item.estimateStr,
+          imageUrl: item.imageUrl || 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&q=80',
+          status: 'active',
+          sourcePlatform: siteName
+        };
+      });
+    } catch (err: any) {
+      console.warn(`[${siteName}] Scraper warning:`, err.message);
+      return [];
+    } finally {
+      if (browser) {
+        await browser.close().catch(() => {});
       }
+    }
+  })();
+
+  return await Promise.race([scrapeTask, timeoutPromise]);
+}
+
+// Dedicated LiveAuctioneers search via direct JSON API
+export async function fetchLiveAuctioneersLots(keyword: string): Promise<any[]> {
+  try {
+    const searchParameters = {
+      searchTerm: keyword,
+      page: 1,
+      pageSize: 36,
+      sort: "-relevance",
+      options: {
+        status: ["upcoming", "live", "online"]
+      },
+      skipAggs: true
+    };
+    const deviceId = crypto.randomUUID();
+    const url = `https://search-party-prod.liveauctioneers.com/search/v4/web?parameters=${encodeURIComponent(JSON.stringify(searchParameters))}&deviceId=${deviceId}`;
+
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json"
+      }
+    });
+
+    if (!res.ok) {
+      console.warn(`LiveAuctioneers search returned status: ${res.status}`);
+      return [];
+    }
+
+    const data: any = await res.json();
+    const items = data?.payload?.items || [];
+
+    return items.map((item: any) => {
+      const directUrl = item.slug
+        ? `https://www.liveauctioneers.com/item/${item.itemId}_${item.slug}`
+        : `https://www.liveauctioneers.com/item/${item.itemId}`;
+
+      const imgUrl = (item.sellerId && item.catalogId && item.itemId)
+        ? `https://p1.liveauctioneers.com/${item.sellerId}/${item.catalogId}/${item.itemId}_1_m.jpg`
+        : "";
+
+      const startPriceNum = Number(item.startPrice);
+      const startPrice = (!isNaN(startPriceNum) && startPriceNum > 0) ? startPriceNum : null;
+      
+      const leadingBidNum = Number(item.leadingBid);
+      const leadingBid = (!isNaN(leadingBidNum) && leadingBidNum > 0) ? leadingBidNum : null;
+      
+      const lowEstNum = Number(item.lowBidEstimate);
+      const lowEst = (!isNaN(lowEstNum) && lowEstNum > 0) ? lowEstNum : null;
+      
+      const highEstNum = Number(item.highBidEstimate);
+      const highEst = (!isNaN(highEstNum) && highEstNum > 0) ? highEstNum : null;
+      const sym = item.currency === "GBP" ? "£" : (item.currency === "EUR" ? "€" : "$");
+      const estimateStr = (lowEst && highEst) ? `${sym}${lowEst} - ${sym}${highEst}` : (lowEst ? `${sym}${lowEst}` : undefined);
+
+      const effectiveStart = startPrice != null ? startPrice : (lowEst != null ? lowEst : null);
+      const currentPrice = leadingBid != null ? leadingBid : effectiveStart;
+
+      const endingDate = (typeof item.lotEndTimeEstimatedTs === "number" && item.lotEndTimeEstimatedTs > 0)
+        ? new Date(item.lotEndTimeEstimatedTs * 1000).toISOString()
+        : (item.saleStartTs ? new Date(item.saleStartTs * 1000).toISOString() : "");
+
+      const locParts = [item.lotLocationCity, item.lotLocationRegion, item.lotLocationCountryCode].filter(Boolean);
+      const address = locParts.join(", ") || item.sellerName || "Online";
+      const country = item.lotLocationCountryCode === "GB" ? "UK" : (item.lotLocationCountryCode || "US");
+      const coords = getCoordinatesForLocation(address, country);
 
       let category = "General";
-      const lowerTitle = item.title.toLowerCase();
+      const lowerTitle = (item.title || "").toLowerCase();
       if (lowerTitle.includes("lathe") || lowerTitle.includes("milling") || lowerTitle.includes("cnc") || lowerTitle.includes("machinery") || lowerTitle.includes("generator") || lowerTitle.includes("press") || lowerTitle.includes("welder")) {
         category = "Machinery";
       } else if (lowerTitle.includes("catering") || lowerTitle.includes("oven") || lowerTitle.includes("freezer") || lowerTitle.includes("fryer") || lowerTitle.includes("restaurant")) {
@@ -315,43 +525,30 @@ async function scrapeBidspotterLots(keyword: string): Promise<any[]> {
       }
 
       return {
-        id: `atg-${Date.now()}-${i}`,
-        title: item.title,
-        url: absoluteUrl,
-        details: `Lot from ${item.sourceName}.${estimateStr ? ` Estimate: ${estimateStr}.` : ""}${openingBid ? ` Opening bid: £${openingBid}.` : ""}`,
-        endingDate: parsedDate,
-        startDate: parsedDate,
-        address: cleanedLoc,
-        latitude: exactCoords.latitude,
-        longitude: exactCoords.longitude,
-        auctioneer: item.sourceName,
+        id: `la-${item.itemId}`,
+        title: item.title || "Auction Lot",
+        url: directUrl,
+        details: item.shortDescription || `Lot #${item.lotNumber || ""} by ${item.sellerName || "LiveAuctioneers"}.${estimateStr ? ` Estimate: ${estimateStr}.` : ""}`,
+        endingDate: endingDate || new Date(Date.now() + 5 * 86400000).toISOString(),
+        startDate: item.saleStartTs ? new Date(item.saleStartTs * 1000).toISOString() : new Date().toISOString(),
+        address: address,
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        auctioneer: item.sellerName || "LiveAuctioneers",
         category: category,
-        country: "UK",
-        currentPrice: effectiveBid,
-        startPrice: openingBid,
+        country: country,
+        currency: sym,
+        currentPrice: currentPrice,
+        startPrice: effectiveStart,
+        bidLabel: leadingBid ? "Current Bid" : (effectiveStart ? "Starting Bid" : undefined),
         estimateStr: estimateStr,
-        reserve: reserve,
-        imageUrl: item.imageUrl || "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&q=80",
-        status: "active"
+        imageUrl: imgUrl || "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&q=80",
+        status: "active",
+        sourcePlatform: "LiveAuctioneers"
       };
     });
   } catch (err: any) {
-    console.warn("Puppeteer scrapeBidspotterLots warning/error (expected if Chromium is not pre-installed in this runtime):", err.message);
-    return [];
-  } finally {
-    if (browser) {
-      await browser.close().catch(() => {});
-    }
-  }
-}
-
-// Timeout wrapper ensuring ATG Puppeteer crawling never blocks search for more than 10 seconds
-async function scrapeBidspotterLotsWithTimeout(keyword: string): Promise<any[]> {
-  const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 10000));
-  try {
-    return await Promise.race([scrapeBidspotterLots(keyword), timeoutPromise]);
-  } catch (err: any) {
-    console.warn("Bidspotter scraper timeout/error:", err.message);
+    console.warn("Error in LiveAuctioneers fetch:", err.message);
     return [];
   }
 }
@@ -758,8 +955,8 @@ async function scrapeHibidLots(keyword: string = "", closingDate: string = ""): 
             location += ", USA";
           }
 
-          const bidMatch = t.match(/(?:Current Bid|Opening Bid|High Bid|Bid):?\s*\$([0-9,]+(?:\.\d{2})?)/i) ||
-                           t.match(/\$([0-9,]+(?:\.\d{2})?)/);
+          const bidMatch = t.match(/(?:Current Bid|Opening Bid|High Bid|Bid):?\s*(?:£|GBP|€|\$)?\s*([0-9,]+(?:\.\d{2})?)/i) ||
+                           t.match(/(?:£|GBP|€|\$)\s*([0-9,]+(?:\.\d{2})?)/);
           const price = bidMatch ? parseFloat(bidMatch[1].replace(/,/g, "")) : null;
 
           lotsRaw.push({
@@ -812,7 +1009,7 @@ async function scrapeHibidLots(keyword: string = "", closingDate: string = ""): 
           const lotMatch = text.match(/Lot\s+([A-Za-z0-9]+)/i);
           const lotNumber = lotMatch ? lotMatch[1] : "";
 
-          const bidMatch = text.match(/(?:Current Bid|Opening Bid|High Bid|Bid):?\s*\$([0-9,]+(?:\.\d{2})?)/i) || text.match(/\$([0-9,]+(?:\.\d{2})?)/);
+          const bidMatch = text.match(/(?:Current Bid|Opening Bid|High Bid|Bid):?\s*(?:£|GBP|€|\$)?\s*([0-9,]+(?:\.\d{2})?)/i) || text.match(/(?:£|GBP|€|\$)\s*([0-9,]+(?:\.\d{2})?)/);
           const price = bidMatch ? parseFloat(bidMatch[1].replace(/,/g, "")) : null;
 
           const idMatch = href.match(/\/lot\/(\d+)/);
@@ -1119,12 +1316,16 @@ function normalizeArtisioLot(lot: any, keyword: string = ""): any {
   // BPI / Artisio pricing:
   // start_price is the opening bid.
   // last_bid_amount is the current bid. If no bid placed yet, starting price serves as the opening bid under "Bid".
-  const startPrice = (typeof lot.start_price === "number" && lot.start_price > 0) ? lot.start_price : null;
-  const lastBid = (typeof lot.last_bid_amount === "number" && lot.last_bid_amount > 0) ? lot.last_bid_amount : null;
+  const startPriceNum = Number(lot.start_price);
+  const startPrice = (!isNaN(startPriceNum) && startPriceNum > 0) ? startPriceNum : null;
+  
+  const lastBidNum = Number(lot.last_bid_amount);
+  const lastBid = (!isNaN(lastBidNum) && lastBidNum > 0) ? lastBidNum : null;
   const currentPrice = lastBid != null ? lastBid : startPrice;
   
   // Reserve: only treat as a reserve if strictly greater than the opening bid
-  const rawReserve = typeof lot.reserve === "number" ? lot.reserve : null;
+  const rawReserveNum = Number(lot.reserve);
+  const rawReserve = !isNaN(rawReserveNum) ? rawReserveNum : null;
   const openingForReserve = startPrice || 0;
   const reserve = (rawReserve != null && rawReserve > openingForReserve) ? rawReserve : null;
   
@@ -1288,13 +1489,17 @@ function normalizeEasyLiveLot(hit: EasyLiveHit, keyword: string = ""): any {
   }
   
   // Easy Live Pricing Logic:
-  // lowEst and highEst are strictly guide estimates (e.g. £50 - £80), NOT confirmed bids.
-  // We strictly leave currentBid and openingBid null if not explicitly provided,
-  // allowing enrichEasyLiveTimedBidding to fetch the real-time bid from doRefreshTimedBidding.
+  // In UK live webcast & catalogue auctions, online bidding starts at the opening bid.
+  // When a lot has a published estimate (e.g. £3 - £8 for Lot 61 "Honda petrol lawnmower"),
+  // advance pre-bidding begins at the low estimate (£3) if no separate start_price is specified.
+  // If start_price is explicitly given in the hit, use that; otherwise if lowEst > 0, opening bid is lowEst.
   const rawStartPrice = typeof hit.start_price === "number" && hit.start_price > 0 ? hit.start_price : null;
-  const openingBid = rawStartPrice;
-  // If no bids placed yet, current bid price and starting price are equal (the available entry price)
+  const openingBid = rawStartPrice != null ? rawStartPrice : (lowEst > 0 ? lowEst : null);
+  // If no bids placed yet (or current_bid equals opening bid), current bid price is opening bid (the available entry price)
   const currentBid = typeof hit.current_bid === "number" && hit.current_bid > 0 ? hit.current_bid : openingBid;
+  const bidLabel = currentBid != null
+    ? (typeof hit.current_bid === "number" && hit.current_bid > 0 && hit.current_bid !== openingBid ? "Current Bid" : "Starting Bid")
+    : undefined;
   
   // High estimate is strictly an estimate, NOT a reserve price! EasyLive does not reveal reserves.
   const reserve = null;
@@ -1405,6 +1610,7 @@ function normalizeEasyLiveLot(hit: EasyLiveHit, keyword: string = ""): any {
     country: "UK",
     currentPrice: currentBid,
     startPrice: openingBid,
+    bidLabel: bidLabel,
     estimateStr: estimateStr || undefined,
     reserve: reserve,
     currency: hit.currency_symbol === "€" ? "EUR" : "GBP",
@@ -1471,8 +1677,10 @@ async function enrichEasyLiveTimedBidding(lots: any[]): Promise<any[]> {
       if (!info) return;
 
       // Parse bid amount if available (e.g. "25 GBP", "Starting bid: 3 GBP")
-      if (info.bid && typeof info.bid === "string") {
-        const numMatch = info.bid.match(/[\d,.]+/);
+      // Parse bid amount if available
+      if (info.bid != null) {
+        const strBid = String(info.bid);
+        const numMatch = strBid.match(/[\d,.]+/);
         if (numMatch) {
           const val = parseFloat(numMatch[0].replace(/,/g, ""));
           if (!isNaN(val) && val > 0) {
@@ -1521,7 +1729,7 @@ async function enrichEasyLiveTimedBidding(lots: any[]): Promise<any[]> {
 }
 
 // Fetch lots from Easy Live Auction via Algolia Search API
-async function fetchEasyLiveAuctionLots(keyword: string, hitsPerPage: number = 20, page: number = 0): Promise<any[]> {
+export async function fetchEasyLiveAuctionLots(keyword: string, hitsPerPage: number = 20, page: number = 0): Promise<any[]> {
   try {
     const url = "https://KBISTY43U6-dsn.algolia.net/1/indexes/*/queries";
     const body = {
@@ -1859,6 +2067,144 @@ app.get("/api/proxy/artisio/lot/:uuid", async (req, res) => {
   }
 });
 
+// Helper to normalize and save newly scraped lots to the live active database
+function normalizeAndStoreLots(rawItems: any[]): any[] {
+  if (!Array.isArray(rawItems)) return [];
+  rawItems.forEach((item: any) => {
+    // If estimate is present and starting/current prices are missing,
+    // pre-bidding opens at the low estimate on UK/US auction portals
+    if ((item.startPrice == null || item.startPrice === 0) && item.estimateStr) {
+      const match = item.estimateStr.match(/[\d,.]+/);
+      if (match) {
+        const val = parseFloat(match[0].replace(/,/g, ""));
+        if (!isNaN(val) && val > 0) {
+          item.startPrice = val;
+          if (item.currentPrice == null || item.currentPrice === 0) {
+            item.currentPrice = val;
+            if (!item.bidLabel) item.bidLabel = "Starting Bid";
+          }
+        }
+      }
+    }
+
+    if ((item.currentPrice == null || item.currentPrice === 0) && typeof item.startPrice === "number" && item.startPrice > 0) {
+      item.currentPrice = item.startPrice;
+      if (!item.bidLabel) item.bidLabel = "Starting Bid";
+    } else if ((item.startPrice == null || item.startPrice === 0) && typeof item.currentPrice === "number" && item.currentPrice > 0) {
+      item.startPrice = item.currentPrice;
+    }
+
+    // Only mark unpriced if the lot is truly blind autobid only: NO current price, NO start price, NO estimate
+    const isUnpriced = (!item.currentPrice || item.currentPrice === 0) &&
+                       (!item.startPrice || item.startPrice === 0) &&
+                       (!item.estimateStr || item.estimateStr === "£0 - £0" || item.estimateStr === "$0 - $0");
+    item.isUnpriced = isUnpriced;
+
+    if (!activeAuctions.some(existing => existing.id === item.id || existing.title.toLowerCase() === item.title.toLowerCase())) {
+      activeAuctions.push(item);
+    }
+  });
+  return rawItems;
+}
+
+// GET: Progressive Server-Sent Events (SSE) stream for live asynchronous auction search
+// Allows the client to immediately render fast-returning APIs (LiveAuctioneers, EasyLive, BPI)
+// while longer scrapers (BidSpotter, The Saleroom, HiBid) continue processing in the background.
+app.get("/api/auctions/search-stream", async (req, res) => {
+  const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
+  const closingDate = typeof req.query.closingDate === "string" ? req.query.closingDate.trim() : "";
+
+  if (!keyword) {
+    return res.status(400).json({ error: "A valid keyword query parameter is required." });
+  }
+
+  // Set SSE headers
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  let isConnected = true;
+  req.on("close", () => {
+    isConnected = false;
+  });
+
+  const sendEvent = (event: string, data: any) => {
+    if (!isConnected || res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    (res as any).flush?.();
+  };
+
+  const searchReferences = [
+    { title: `LiveAuctioneers Search for "${keyword}" (Direct Catalog Search)`, url: `https://www.liveauctioneers.com/search/?keyword=${encodeURIComponent(keyword)}&sort=-relevance&status=online` },
+    { title: `BidSpotter UK Search for "${keyword}" (Live Puppeteer Scraper)`, url: `https://www.bidspotter.co.uk/en-gb/search-results?searchTerm=${encodeURIComponent(keyword)}` },
+    { title: `The Saleroom Search for "${keyword}" (Live Puppeteer Scraper)`, url: `https://www.the-saleroom.com/en-gb/search-results?searchTerm=${encodeURIComponent(keyword)}` },
+    { title: `HiBid Worldwide Search for "${keyword}" (miles=-1)`, url: `https://hibid.com/lots?q=${encodeURIComponent(keyword)}&miles=-1&status=ALL${closingDate ? `&closingDate=${encodeURIComponent(closingDate)}` : ''}` },
+    { title: `Silicon Valley Disposition Upcoming US Auctions`, url: "https://svdisposition.com/upcoming-auctions" },
+    { title: `Easy Live Auction Search for "${keyword}"`, url: `https://www.easyliveauction.com/catalogue/?searchTerm=${encodeURIComponent(keyword)}&searchOption=3` },
+    { title: `BPI Auctions Search for "${keyword}"`, url: `https://bpiauctions.com/auctions/#/search?query=${encodeURIComponent(keyword)}` }
+  ];
+
+  sendEvent("init", {
+    keyword,
+    references: searchReferences
+  });
+
+  const runProvider = async (id: string, name: string, task: () => Promise<any[]>) => {
+    if (!isConnected) return;
+    sendEvent("provider_status", { provider: id, name, status: "searching" });
+    try {
+      const raw = await task();
+      const lots = normalizeAndStoreLots(raw);
+      if (!isConnected) return;
+      sendEvent("provider_results", {
+        provider: id,
+        name,
+        status: "completed",
+        count: lots.length,
+        lots
+      });
+    } catch (err: any) {
+      console.error(`Streaming error for ${name}:`, err.message);
+      if (!isConnected) return;
+      sendEvent("provider_results", {
+        provider: id,
+        name,
+        status: "error",
+        error: err.message,
+        count: 0,
+        lots: []
+      });
+    }
+  };
+
+  const tasks = [
+    runProvider("liveAuctioneers", "LiveAuctioneers", () => fetchLiveAuctioneersLots(keyword)),
+    runProvider("easyLiveAuction", "Easy Live Auction", () => fetchEasyLiveAuctionLots(keyword, 35, 0)),
+    runProvider("bpiAuctions", "BPI Auctions", () => scrapeBpiLots(keyword, 2)),
+    runProvider("hibidSvd", "HiBid / SVD", async () => {
+      const [hLots, sLots] = await Promise.all([
+        scrapeHibidLotsWithTimeout(keyword, closingDate),
+        scrapeSvdUpcomingAuctions(keyword)
+      ]);
+      return [...hLots, ...sLots];
+    }),
+    runProvider("bidspotter", "BidSpotter", () => scrapeBidspotterLots(keyword)),
+    runProvider("theSaleroom", "The Saleroom", () => scrapeTheSaleroomLots(keyword))
+  ];
+
+  await Promise.allSettled(tasks);
+
+  if (isConnected) {
+    sendEvent("complete", {
+      status: "success",
+      references: searchReferences
+    });
+    res.end();
+  }
+});
+
 // POST: Real-time Multi-Source Web Scrape and API Search of US & UK Auction Sites
 app.post("/api/auctions/search", async (req, res) => {
   const { keyword, closingDate } = req.body;
@@ -1873,53 +2219,47 @@ app.post("/api/auctions/search", async (req, res) => {
 
   // Direct reference links to live sources
   const searchReferences = [
+    { title: `LiveAuctioneers Search for "${keyword}" (Direct Catalog Search)`, url: `https://www.liveauctioneers.com/search/?keyword=${encodeURIComponent(keyword)}&sort=-relevance&status=online` },
+    { title: `BidSpotter UK Search for "${keyword}" (Live Puppeteer Scraper)`, url: `https://www.bidspotter.co.uk/en-gb/search-results?searchTerm=${encodeURIComponent(keyword)}` },
+    { title: `The Saleroom Search for "${keyword}" (Live Puppeteer Scraper)`, url: `https://www.the-saleroom.com/en-gb/search-results?searchTerm=${encodeURIComponent(keyword)}` },
     { title: `HiBid Worldwide Search for "${keyword}" (miles=-1)`, url: `https://hibid.com/lots?q=${encodeURIComponent(keyword)}&miles=-1&status=ALL${cleanClosingDate ? `&closingDate=${encodeURIComponent(cleanClosingDate)}` : ''}` },
     { title: `Silicon Valley Disposition Upcoming US Auctions`, url: "https://svdisposition.com/upcoming-auctions" },
     { title: `Easy Live Auction Search for "${keyword}"`, url: `https://www.easyliveauction.com/catalogue/?searchTerm=${encodeURIComponent(keyword)}&searchOption=3` },
-    { title: `BPI Auctions Search for "${keyword}"`, url: `https://bpiauctions.com/auctions/#/search?query=${encodeURIComponent(keyword)}` },
-    { title: `BidSpotter UK Search for "${keyword}" (Live Puppeteer Scraper / 1-Click Search)`, url: `https://www.bidspotter.co.uk/en-gb/search-results?searchTerm=${encodeURIComponent(keyword)}` },
-    { title: `The Saleroom Search for "${keyword}" (Protected by anti-bot verification - open live)`, url: `https://www.the-saleroom.com/en-gb/search-results?searchTerm=${encodeURIComponent(keyword)}` }
+    { title: `BPI Auctions Search for "${keyword}"`, url: `https://bpiauctions.com/auctions/#/search?query=${encodeURIComponent(keyword)}` }
   ];
 
   try {
-    // Run all US & UK auction queries in parallel (including fast HiBid global scraper, BPI, EasyLive, and ATG Network)
-    const [bpiResults, easyLiveResults, atgResults, hibidResults, svdResults] = await Promise.allSettled([
+    // Run all US & UK auction queries in parallel across all independent platforms
+    const [liveAuctioneersResults, bidspotterResults, theSaleroomResults, bpiResults, easyLiveResults, hibidResults, svdResults] = await Promise.allSettled([
+      fetchLiveAuctioneersLots(keyword),
+      scrapeBidspotterLots(keyword),
+      scrapeTheSaleroomLots(keyword),
       scrapeBpiLots(keyword, 2),
       fetchEasyLiveAuctionLots(keyword, 35, 0),
-      scrapeBidspotterLotsWithTimeout(keyword),
       scrapeHibidLotsWithTimeout(keyword, cleanClosingDate),
       scrapeSvdUpcomingAuctions(keyword)
     ]);
 
+    const scrapedLiveAuctioneers = liveAuctioneersResults.status === "fulfilled" ? liveAuctioneersResults.value : [];
+    const scrapedBidspotter = bidspotterResults.status === "fulfilled" ? bidspotterResults.value : [];
+    const scrapedTheSaleroom = theSaleroomResults.status === "fulfilled" ? theSaleroomResults.value : [];
     const scrapedBpiLots = bpiResults.status === "fulfilled" ? bpiResults.value : [];
     const scrapedEasyLiveLots = easyLiveResults.status === "fulfilled" ? easyLiveResults.value : [];
-    const scrapedAtg = atgResults.status === "fulfilled" ? atgResults.value : [];
     const scrapedHibid = hibidResults.status === "fulfilled" ? hibidResults.value : [];
     const scrapedSvd = svdResults.status === "fulfilled" ? svdResults.value : [];
 
-    console.log(`Results fetched: HiBid (${scrapedHibid.length} lots [miles=-1]), SVD (${scrapedSvd.length}), BPI (${scrapedBpiLots.length}), EasyLive (${scrapedEasyLiveLots.length}), ATG Network (${scrapedAtg.length})`);
+    console.log(`Results fetched: LiveAuctioneers (${scrapedLiveAuctioneers.length}), BidSpotter (${scrapedBidspotter.length}), The Saleroom (${scrapedTheSaleroom.length}), HiBid (${scrapedHibid.length}), SVD (${scrapedSvd.length}), BPI (${scrapedBpiLots.length}), EasyLive (${scrapedEasyLiveLots.length})`);
 
-    // Combine all listings (US & UK)
-    let scrapedListings = [...scrapedHibid, ...scrapedSvd, ...scrapedEasyLiveLots, ...scrapedBpiLots, ...scrapedAtg];
-
-    // Determine unpriced/autobid status and deprioritise them to the end of the list
-    scrapedListings.forEach((item: any) => {
-      // With no bids placed, a starting price is the active entry price, so current bid price and starting price are equal
-      if ((item.currentPrice == null || item.currentPrice === 0) && typeof item.startPrice === "number" && item.startPrice > 0) {
-        item.currentPrice = item.startPrice;
-      } else if ((item.startPrice == null || item.startPrice === 0) && typeof item.currentPrice === "number" && item.currentPrice > 0) {
-        item.startPrice = item.currentPrice;
-      }
-
-      const isUnpriced = (!item.currentPrice || item.currentPrice === 0) &&
-                         (!item.startPrice || item.startPrice === 0) &&
-                         (!item.estimateStr || item.estimateStr === "£0 - £0" || item.estimateStr === "$0 - $0");
-      item.isUnpriced = isUnpriced;
-
-      if (!activeAuctions.some(existing => existing.id === item.id || existing.title.toLowerCase() === item.title.toLowerCase())) {
-        activeAuctions.push(item);
-      }
-    });
+    // Combine all listings across every provider and normalize
+    let scrapedListings = normalizeAndStoreLots([
+      ...scrapedLiveAuctioneers,
+      ...scrapedBidspotter,
+      ...scrapedTheSaleroom,
+      ...scrapedHibid,
+      ...scrapedSvd,
+      ...scrapedEasyLiveLots,
+      ...scrapedBpiLots
+    ]);
 
     // Deprioritise unpriced lots to the end of the collection
     scrapedListings.sort((a, b) => {
@@ -1933,16 +2273,18 @@ app.post("/api/auctions/search", async (req, res) => {
       source: "multi-api-us-uk-aggregated",
       count: scrapedListings.length,
       breakdown: {
-        hibidSvd: scrapedHibid.length + scrapedSvd.length,
+        liveAuctioneers: scrapedLiveAuctioneers.length,
+        bidspotter: scrapedBidspotter.length,
+        theSaleroom: scrapedTheSaleroom.length,
         easyLiveAuction: scrapedEasyLiveLots.length,
         bpiAuctions: scrapedBpiLots.length,
-        atgNetwork: scrapedAtg.length,
+        hibidSvd: scrapedHibid.length + scrapedSvd.length,
+        liveAuctioneersStatus: `Active (${scrapedLiveAuctioneers.length} lots extracted)`,
+        bidspotterStatus: `Active (${scrapedBidspotter.length} lots extracted via Puppeteer)`,
+        theSaleroomStatus: `Active (${scrapedTheSaleroom.length} lots extracted via Puppeteer)`,
         hibidStatus: scrapedHibid.length > 0 || scrapedSvd.length > 0
           ? `Active (${scrapedHibid.length} lots extracted via HiBid global catalog [miles=-1] + ${scrapedSvd.length} catalog events)`
-          : "Active (ready for US lot queries)",
-        atgStatus: scrapedAtg.length > 0
-          ? `Active (${scrapedAtg.length} lots extracted via Puppeteer)`
-          : "Anti-bot challenge active or Chromium pending — direct 1-click verified search available"
+          : "Active (ready for US lot queries)"
       },
       data: scrapedListings,
       references: searchReferences
@@ -1999,7 +2341,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  if (process.env.NODE_ENV !== "test") app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

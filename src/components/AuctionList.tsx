@@ -172,10 +172,11 @@ export default function AuctionList({
   };
 
   const isLotUnpriced = (item: AuctionListing) => {
-    if (item.isUnpriced === true) return true;
+    // A lot is unpriced only if it has no confirmed current price, no starting price,
+    // and no guide estimate (truly blind autobid only, e.g. "Estimate: No Estimate")
     const hasPrice = (typeof item.currentPrice === "number" && item.currentPrice > 0) ||
                      (typeof item.startPrice === "number" && item.startPrice > 0) ||
-                     (Boolean(item.estimateStr) && item.estimateStr !== "£0 - £0");
+                     (Boolean(item.estimateStr) && item.estimateStr !== "£0 - £0" && item.estimateStr !== "$0 - $0");
     return !hasPrice;
   };
 
@@ -231,28 +232,40 @@ export default function AuctionList({
                 <div className="flex flex-wrap gap-2 items-center mb-1">
                   {/* Country Flag Badge */}
                   <span className="inline-flex items-center text-[10px] font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200">
-                    {item.country === "UK" ? "🇬🇧 UK" : "🇺🇸 US"}
+                    {item.country === "UK" || item.country === "GB" ? "🇬🇧 UK" : (item.country === "US" ? "🇺🇸 US" : (item.country ? `🌐 ${item.country}` : "🌐 Global"))}
                   </span>
                   {/* Platform Badge */}
-                  {item.id.startsWith("easylive") ? (
+                  {item.sourcePlatform === "LiveAuctioneers" || item.id.startsWith("la-") ? (
+                    <span className="inline-flex items-center text-[10px] font-bold bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded border border-rose-200">
+                      LiveAuctioneers
+                    </span>
+                  ) : item.sourcePlatform === "BidSpotter" || item.id.startsWith("bidspotter-") ? (
+                    <span className="inline-flex items-center text-[10px] font-bold bg-sky-50 text-sky-700 px-1.5 py-0.5 rounded border border-sky-200">
+                      BidSpotter
+                    </span>
+                  ) : item.sourcePlatform === "The Saleroom" || item.id.startsWith("saleroom-") ? (
+                    <span className="inline-flex items-center text-[10px] font-bold bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200">
+                      The Saleroom
+                    </span>
+                  ) : item.id.startsWith("easylive") || item.sourcePlatform === "Easy Live Auction" ? (
                     <span className="inline-flex items-center text-[10px] font-bold bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-200">
                       Easy Live
                     </span>
-                  ) : item.id.startsWith("bpilot") ? (
+                  ) : item.id.startsWith("bpilot") || item.sourcePlatform === "BPI Auctions" ? (
                     <span className="inline-flex items-center text-[10px] font-bold bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">
                       BPI / Artisio
                     </span>
-                  ) : item.id.startsWith("atg-") ? (
-                    <span className="inline-flex items-center text-[10px] font-bold bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200">
-                      {item.auctioneer || "ATG Media"}
-                    </span>
-                  ) : item.id.startsWith("hibid") ? (
+                  ) : item.id.startsWith("hibid") || item.sourcePlatform === "HiBid" ? (
                     <span className="inline-flex items-center text-[10px] font-bold bg-amber-50 text-amber-800 px-1.5 py-0.5 rounded border border-amber-200">
                       HiBid
                     </span>
-                  ) : item.id.startsWith("svd") ? (
+                  ) : item.id.startsWith("svd") || item.sourcePlatform === "Silicon Valley Disposition" ? (
                     <span className="inline-flex items-center text-[10px] font-bold bg-amber-50 text-amber-800 px-1.5 py-0.5 rounded border border-amber-200">
                       SVD
+                    </span>
+                  ) : item.sourcePlatform ? (
+                    <span className="inline-flex items-center text-[10px] font-bold bg-slate-50 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200">
+                      {item.sourcePlatform}
                     </span>
                   ) : null}
                   {/* Category Badge */}
@@ -306,9 +319,20 @@ export default function AuctionList({
 
                   {/* Bid badge: show opening bid or current bid. Never show £0 */}
                   {(() => {
+                    let lowEstFromStr: number | null = null;
+                    if (item.estimateStr) {
+                      const match = item.estimateStr.match(/[\d,.]+/);
+                      if (match) {
+                        const parsed = parseFloat(match[0].replace(/,/g, ""));
+                        if (!isNaN(parsed) && parsed > 0) lowEstFromStr = parsed;
+                      }
+                    }
+
                     const effectiveBid = (item.currentPrice != null && item.currentPrice > 0)
                       ? item.currentPrice
-                      : (item.startPrice != null && item.startPrice > 0 ? item.startPrice : null);
+                      : (item.startPrice != null && item.startPrice > 0 
+                          ? item.startPrice 
+                          : lowEstFromStr);
 
                     if (effectiveBid != null) {
                       const label = item.bidLabel ? item.bidLabel.replace(/:$/, "") : "Bid";
@@ -320,16 +344,12 @@ export default function AuctionList({
                       );
                     }
 
-                    // If neither price nor estimate is present, render unpriced badge
-                    if (!item.estimateStr) {
-                      return (
-                        <span className="font-sans text-[11px] font-semibold text-slate-500 bg-slate-100 border border-slate-200/80 px-2 py-0.5 rounded-md">
-                          Unpriced / Autobid only
-                        </span>
-                      );
-                    }
-
-                    return null;
+                    // If neither price nor estimate is present (truly blind autobid only)
+                    return (
+                      <span className="font-sans text-[11px] font-semibold text-slate-500 bg-slate-100 border border-slate-200/80 px-2 py-0.5 rounded-md">
+                        Unpriced / Autobid only
+                      </span>
+                    );
                   })()}
                   
                   {/* Reserve: ONLY show if reserve is strictly in place above the opening bid */}
