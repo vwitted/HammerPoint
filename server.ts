@@ -160,7 +160,7 @@ export async function scrapeTheSaleroomLots(keyword: string): Promise<any[]> {
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     const res = await fetch(url, {
       method: 'POST',
@@ -471,12 +471,18 @@ export async function fetchLiveAuctioneersLots(keyword: string): Promise<any[]> 
     const deviceId = crypto.randomUUID();
     const url = `https://search-party-prod.liveauctioneers.com/search/v4/web?parameters=${encodeURIComponent(JSON.stringify(searchParameters))}&deviceId=${deviceId}`;
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
     const res = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "application/json"
-      }
+        "Accept": "application/json",
+        "Connection": "close"
+      },
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       console.warn(`LiveAuctioneers search returned status: ${res.status}`);
@@ -748,10 +754,11 @@ const hibidDetailCache = new Map<string, { timestamp: number; detail: any }>();
 async function scrapeSvdUpcomingAuctions(keyword?: string): Promise<any[]> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     const res = await fetch("https://svdisposition.com/upcoming-auctions", {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Connection": "close"
       },
       signal: controller.signal
     });
@@ -998,8 +1005,8 @@ async function scrapeHibidLots(keyword: string = "", closingDate: string = ""): 
       });
       const page = await browser.newPage();
       await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-      await page.goto(targetUrl, { waitUntil: "networkidle2", timeout: 15000 });
-      await page.waitForSelector("a[href*=\"/lot/\"]", { timeout: 6000 }).catch(() => {});
+      await page.goto(targetUrl, { waitUntil: "networkidle2", timeout: 25000 });
+      await page.waitForSelector("a[href*=\"/lot/\"]", { timeout: 8000 }).catch(() => {});
 
       lotsRaw = await page.evaluate(() => {
         const lotLinks = Array.from(document.querySelectorAll("a[href*=\"/lot/\"]"));
@@ -1125,9 +1132,9 @@ async function scrapeHibidLots(keyword: string = "", closingDate: string = ""): 
   return parsedListings;
 }
 
-// Timeout wrapper ensuring HiBid search never blocks for more than 15 seconds
+// Timeout wrapper ensuring HiBid search never blocks for more than 30 seconds
 async function scrapeHibidLotsWithTimeout(keyword: string = "", closingDate: string = ""): Promise<any[]> {
-  const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 15000));
+  const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 30000));
   try {
     return await Promise.race([scrapeHibidLots(keyword, closingDate), timeoutPromise]);
   } catch (err: any) {
@@ -1658,7 +1665,7 @@ async function enrichEasyLiveTimedBidding(lots: any[]): Promise<any[]> {
         info = cached.data;
       } else {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
 
         const res = await fetch("https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding", {
           method: "POST",
@@ -1754,7 +1761,7 @@ export async function fetchEasyLiveAuctionLots(keyword: string, hitsPerPage: num
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     const res = await fetch(url, {
       method: "POST",
