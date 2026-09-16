@@ -1,0 +1,78 @@
+{
+ "note": "Easy Live Algolia query, keyword 'lathe', trimmed to 8 hits, plus their doRefreshTimedBidding responses",
+ "recordedAt": "2026-09-16T23:24:00Z",
+ "requests": [
+  {
+   "key": "POST https://kbisty43u6-dsn.algolia.net/1/indexes/*/queries {\"requests\":[{\"indexName\":\"Upcoming_Auctions\",\"query\":\"lathe\",\"params\":\"hitsPerPage=35&page=0&facetFilters=[\\\"sold:X\\\"]\"}]}",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "body": "{\"results\":[{\"hits\":[{\"auction_type\":\"Live\",\"currency_symbol\":\"£\",\"ukEndDate\":false,\"low_est\":100,\"end_date\":\"17 Sep\",\"start_date\":\"15 Sep\",\"high_est\":200,\"imgPath\":\"F0311A478EC9D4461D42709AC526B072_law02/1100275715\",\"ukStartDate\":false,\"description\":\"Table top clock makers lathe by Elliott with accessories\",\"lot_url\":\"5f808c9b80b75bab7da2933b37717627/86cba608b14f7dda2f72c6f5ebdaa66a/threeday-auction-of-antiques-and-collectables-lot-1528/\",\"objectID\":\"law02_1139264061\",\"_highlightResult\":{\"description\":{\"value\":\"Table top clock makers <em>lathe</em> by Elliott with accessories\",\"matchLevel\":\"full\",\"fullyHighlighted\":false,\"matchedWords\":[\"lathe\"]}}},{\"auction_type\":\"Live\",\"currency_symbol\":\"£\",\"ukEndDate\":false,\"low_est\":500,\"end_date\":\"17 Sep\",\"start_date\":\"16 Sep\",\"high_est\":700,\"imgPath\":\"E506B0A64380A30014004C706C2FCE48_els01/1100132575\",\"ukStartDate\":false,\"description\":\"A GROUP OF VINTAGE WATCHMAKERS TOOLS. a watch crystal cutter; a bench lathe; and a rounding up tool. (3)\",\"lot_url\":\"84628b93a09305d0d87e6b0a9c4e3fd0/0af8d24542e81eb9357e7ef448a6646f/fine-art-antiques-lot-450/\",\"objectID\":\"els01_1139318569\",\"_highlightResult\":{\"description\":{\"value\":\"A GROUP OF VINTAGE WATCHMAKERS TOOLS. a watch crystal cutter; a bench <em>lathe</em>; and a rounding up tool. (3)\",\"matchLevel\":\"full\",\"fullyHighlighted\":false,\"matchedWords\":[\"lathe\"]}}},{\"auction_type\":\"Live\",\"currency_symbol\":\"£\",\"ukEndDate\":false,\"low_est\":20,\"end_date\":\"17 Sep\",\"start_date\":\"17 Sep\",\"high_est\":30,\"imgPath\":\"75F3DBE73F1985B41AF5C496D261CC60_dav03/1100090837\",\"ukStartDate\":false,\"description\":\"A CRAFTSMAN lathe G Not for mailing\",\"lot_url\":\"c42c946ea51bf97a2650329dfcbd699a/0af8d24542e81eb9357e7ef448a6646f/a-unique-unused-special-order-36-dt-steel-norris-a1-lot-151/\",\"objectID\":\"dav03_1139241478\",\"_highlightResult\":{\"description\":{\"value\":\"A CRAFTSMAN <em>lathe</em> G Not for mailing\",\"matchLevel\":\"full\",\"fullyHighlighted\":false,\"matchedWords\":[\"lathe\"]}}},{\"auction_type\":\"Live\",\"currency_symbol\":\"£\",\"ukEndDate\":false,\"low_est\":20,\"end_date\":\"17 Sep\",\"start_date\":\"17 Sep\",\"high_est\":30,\"imgPath\":\"75F3DBE73F1985B41AF5C496D261CC60_dav03/1100090841\",\"ukStartDate\":false,\"description\":\"A lathe bed and headstock by ETA TOOL Co Leicester G+ Not for mailing\",\"lot_url\":\"3df0b01e9fb62b908ca308bb09bfe4d2/0af8d24542e81eb9357e7ef448a6646f/a-unique-unused-special-order-36-dt-steel-norris-a1-lot-152/\",\"objectID\":\"dav03_1139241479\",\"_highlightResult\":{\"description\":{\"value\":\"A <em>lathe</em> bed and headstock by ETA TOOL Co Leicester G+ Not for mailing\",\"matchLevel\":\"full\",\"fullyHighlighted\":false,\"matchedWords\":[\"lathe\"]}}},{\"auction_type\":\"Live\",\"currency_symbol\":\"£\",\"ukEndDate\":false,\"low_est\":20,\"end_date\":\"17 Sep\",\"start_date\":\"17 Sep\",\"high_est\":30,\"imgPath\":\"75F3DBE73F1985B41AF5C496D261CC60_dav03/1100091110\",\"ukStartDate\":false,\"description\":\"A DRUMMOND M Type lathe and cross slide G Not for mailing\",\"lot_url\":\"1da744fde373be60b5c8696bc783b18a/0af8d24542e81eb9357e7ef448a6646f/a-unique-unused-special-order-36-dt-steel-norris-a1-lot-265/\",\"objectID\":\"dav03_1139241592\",\"_highlightResult\":{\"description\":{\"value\":\"A DRUMMOND M Type <em>lathe</em> and cross slide G Not for mailing\",\"matchLevel\":\"full\",\"fullyHighlighted\":false,\"matchedWords\":[\"lathe\"]}}},{\"auction_type\":\"Live\",\"currency_symbol\":\"£\",\"ukEndDate\":false,\"low_est\":100,\"end_date\":\"17 Sep\",\"start_date\":\"17 Sep\",\"high_est\":150,\"imgPath\":\"75F3DBE73F1985B41AF5C496D261CC60_dav03/1100092189\",\"ukStartDate\":false,\"description\":\"Five little used Pole-Lathe turning tools by ASHLEY ILES G++\",\"lot_url\":\"fd9aafc3f061cb9d1df6777d819a3024/0af8d24542e81eb9357e7ef448a6646f/a-unique-unused-special-order-36-dt-steel-norris-a1-lot-667/\",\"objectID\":\"dav03_1139241996\",\"_highlightResult\":{\"description\":{\"value\":\"Five little used Pole-<em>Lathe</em> turning tools by ASHLEY ILES G++\",\"matchLevel\":\"full\",\"fullyHighlighted\":false,\"matchedWords\":[\"lathe\"]}}},{\"auction_type\":\"Live\",\"currency_symbol\":\"£\",\"ukEndDate\":false,\"low_est\":0,\"end_date\":\"17 Sep\",\"start_date\":\"17 Sep\",\"high_est\":0,\"imgPath\":\"458A99F57BE83FE0EBDA2E9CFD5409DF_nor06/1100458106\",\"ukStartDate\":false,\"description\":\"A group of turned hardwood bowls, 20th century, comprising one large deep bowl and three smaller examples, each with rounded sides and visible lathe-turned grain, suitable for display or tabletop use.\",\"lot_url\":\"70ce8e960dd69d029ab03ca2b3858f32/0af8d24542e81eb9357e7ef448a6646f/antiques-collectables-sale-to-include-antique-pistol-lot-240/\",\"objectID\":\"nor06_1139440984\",\"_highlightResult\":{\"description\":{\"value\":\"A group of turned hardwood bowls, 20th century, comprising one large deep bowl and three smaller examples, each with rounded sides and visible <em>lathe</em>-turned grain, suitable for display or tabletop use.\",\"matchLevel\":\"full\",\"fullyHighlighted\":false,\"matchedWords\":[\"lathe\"]}}},{\"auction_type\":\"Live\",\"currency_symbol\":\"£\",\"ukEndDate\":false,\"low_est\":25,\"end_date\":\"18 Sep\",\"start_date\":\"16 Sep\",\"high_est\":50,\"imgPath\":\"\",\"ukStartDate\":false,\"description\":\"AN ASSORTMENT OF TOOLS TO INCLUDE DRILL CHUCKS, LATHE CHUCKS AND CLAMPS ETC\",\"lot_url\":\"64196456d1caf7f600b2a242e30e5316/1f1638c9faeb7c2641b7b1e9c67628d0/three-day-auction-of-collectables-antiques-jewellery-lot-1953/\",\"objectID\":\"ash03_1139382920\",\"_highlightResult\":{\"description\":{\"value\":\"AN ASSORTMENT OF TOOLS TO INCLUDE DRILL CHUCKS, <em>LATHE</em> CHUCKS AND CLAMPS ETC\",\"matchLevel\":\"full\",\"fullyHighlighted\":false,\"matchedWords\":[\"lathe\"]}}}],\"nbHits\":48,\"page\":0,\"nbPages\":2,\"hitsPerPage\":35,\"exhaustiveNbHits\":true,\"exhaustiveTypo\":true,\"exhaustive\":{\"nbHits\":true,\"typo\":true},\"query\":\"lathe\",\"params\":\"query=lathe&hitsPerPage=35&page=0&facetFilters=[\\\"sold:X\\\"]\",\"index\":\"Upcoming_Auctions\",\"renderingContent\":{},\"processingTimeMS\":9,\"processingTimingsMS\":{\"_request\":{\"roundTrip\":13},\"extensions\":1,\"fetch\":{\"query\":1,\"scanning\":1,\"total\":6},\"total\":9},\"serverTimeMS\":10}]}"
+  },
+  {
+   "key": "POST https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding data=%7B%22lot%22%3A%225f808c9b80b75bab7da2933b37717627%22%2C%22l%22%3A%220%22%7D",
+   "status": 200,
+   "headers": {
+    "content-type": "text/html;charset=UTF-8"
+   },
+   "body": "//{}"
+  },
+  {
+   "key": "POST https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding data=%7B%22lot%22%3A%22c42c946ea51bf97a2650329dfcbd699a%22%2C%22l%22%3A%220%22%7D",
+   "status": 200,
+   "headers": {
+    "content-type": "text/html;charset=UTF-8"
+   },
+   "body": "//{\"maxNextBid\":\"Min: 38 GBP\",\"endTime\":\"17 Sep from 09:30 BST   \",\"beenOutbid\":0,\"theLeader\":0,\"ended\":0,\"userCurrentBid\":0,\"bidStatusText\":\"\",\"bidStatus\":0,\"lotQuantity\":\"1\",\"syncBid\":\"1\",\"closeToFinish\":0,\"reserveMet\":0,\"reserve\":\"Met\",\"endLabel\":\"Auction Starts:\",\"watching\":9,\"secondsLeft\":299,\"maxBid\":\"None\",\"bid\":\"35 GBP\",\"bidLabel\":\"Current Bid:\",\"bidStatusTextColor\":\"\",\"dateEnd\":\"September, 17 2026 09:30:00\",\"history\":3}"
+  },
+  {
+   "key": "POST https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding data=%7B%22lot%22%3A%2284628b93a09305d0d87e6b0a9c4e3fd0%22%2C%22l%22%3A%220%22%7D",
+   "status": 200,
+   "headers": {
+    "content-type": "text/html;charset=UTF-8"
+   },
+   "body": "//{}"
+  },
+  {
+   "key": "POST https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding data=%7B%22lot%22%3A%223df0b01e9fb62b908ca308bb09bfe4d2%22%2C%22l%22%3A%220%22%7D",
+   "status": 200,
+   "headers": {
+    "content-type": "text/html;charset=UTF-8"
+   },
+   "body": "//{\"maxNextBid\":\"Min: 8 GBP\",\"endTime\":\"17 Sep from 09:30 BST   \",\"beenOutbid\":0,\"theLeader\":0,\"ended\":0,\"userCurrentBid\":0,\"bidStatusText\":\"\",\"bidStatus\":0,\"lotQuantity\":\"1\",\"syncBid\":\"1\",\"closeToFinish\":0,\"reserveMet\":0,\"reserve\":\"Not Met\",\"endLabel\":\"Auction Starts:\",\"watching\":2,\"secondsLeft\":299,\"maxBid\":\"None\",\"bid\":\"8 GBP\",\"bidLabel\":\"Starting Bid:\",\"bidStatusTextColor\":\"\",\"dateEnd\":\"September, 17 2026 09:30:00\",\"history\":0}"
+  },
+  {
+   "key": "POST https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding data=%7B%22lot%22%3A%22fd9aafc3f061cb9d1df6777d819a3024%22%2C%22l%22%3A%220%22%7D",
+   "status": 200,
+   "headers": {
+    "content-type": "text/html;charset=UTF-8"
+   },
+   "body": "//{\"maxNextBid\":\"Min: 85 GBP\",\"endTime\":\"17 Sep from 09:30 BST   \",\"beenOutbid\":0,\"theLeader\":0,\"ended\":0,\"userCurrentBid\":0,\"bidStatusText\":\"\",\"bidStatus\":0,\"lotQuantity\":\"1\",\"syncBid\":\"1\",\"closeToFinish\":0,\"reserveMet\":0,\"reserve\":\"Not Met\",\"endLabel\":\"Auction Starts:\",\"watching\":0,\"secondsLeft\":299,\"maxBid\":\"None\",\"bid\":\"85 GBP\",\"bidLabel\":\"Starting Bid:\",\"bidStatusTextColor\":\"\",\"dateEnd\":\"September, 17 2026 09:30:00\",\"history\":0}"
+  },
+  {
+   "key": "POST https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding data=%7B%22lot%22%3A%2270ce8e960dd69d029ab03ca2b3858f32%22%2C%22l%22%3A%220%22%7D",
+   "status": 200,
+   "headers": {
+    "content-type": "text/html;charset=UTF-8"
+   },
+   "body": "//{}"
+  },
+  {
+   "key": "POST https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding data=%7B%22lot%22%3A%221da744fde373be60b5c8696bc783b18a%22%2C%22l%22%3A%220%22%7D",
+   "status": 200,
+   "headers": {
+    "content-type": "text/html;charset=UTF-8"
+   },
+   "body": "//{\"maxNextBid\":\"Min: 8 GBP\",\"endTime\":\"17 Sep from 09:30 BST   \",\"beenOutbid\":0,\"theLeader\":0,\"ended\":0,\"userCurrentBid\":0,\"bidStatusText\":\"\",\"bidStatus\":0,\"lotQuantity\":\"1\",\"syncBid\":\"1\",\"closeToFinish\":0,\"reserveMet\":0,\"reserve\":\"Not Met\",\"endLabel\":\"Auction Starts:\",\"watching\":4,\"secondsLeft\":299,\"maxBid\":\"None\",\"bid\":\"8 GBP\",\"bidLabel\":\"Starting Bid:\",\"bidStatusTextColor\":\"\",\"dateEnd\":\"September, 17 2026 09:30:00\",\"history\":0}"
+  },
+  {
+   "key": "POST https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding data=%7B%22lot%22%3A%2264196456d1caf7f600b2a242e30e5316%22%2C%22l%22%3A%220%22%7D",
+   "status": 200,
+   "headers": {
+    "content-type": "text/html;charset=UTF-8"
+   },
+   "body": "//{}"
+  }
+ ]
+}
