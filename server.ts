@@ -159,15 +159,22 @@ export async function scrapeTheSaleroomLots(keyword: string): Promise<any[]> {
       }).toString()
     };
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Algolia-Application-Id': appId,
-        'X-Algolia-API-Key': apiKey
+        'X-Algolia-API-Key': apiKey,
+        'Connection': 'close',
+        'User-Agent': 'Mozilla/5.0'
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
     if (!res.ok) throw new Error(`Algolia query status: ${res.status}`);
     return await res.json();
   };
@@ -275,6 +282,12 @@ async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, idPrefix
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           await page.waitForSelector('article.panel.item, .lot-single, [class*="lot-single"]', { timeout: 8000 }).catch(() => {});
+          
+          const cardCount = await page.evaluate(() => document.querySelectorAll('article.panel.item, .lot-single, [class*="lot-single"]').length);
+          if (cardCount > 0) {
+            // Wait for asynchronous BidSpotter pricing scripts (bindBiddingLiveLotData) to populate bids
+            await new Promise(r => setTimeout(r, 3000));
+          }
 
           rawLots = await page.evaluate(`(() => {
             const cards = Array.from(document.querySelectorAll('article.panel.item, .lot-single, [class*="lot-single"]'));
@@ -1146,10 +1159,6 @@ async function fetchArtisioHeadersCompliant(options: ArtisioRequestOptions): Pro
   const url = `https://webapp.artisio.co/website/lots?q=${encodeURIComponent(q)}&lot_status=${encodeURIComponent(lotStatus)}&auction_type=${encodeURIComponent(auctionType)}&page=${page}`;
 
   const compliantHeaders: Record<string, string> = {
-    "authority": "webapp.artisio.co",
-    "method": "GET",
-    "path": `/website/lots?q=${encodeURIComponent(q)}&lot_status=${encodeURIComponent(lotStatus)}&auction_type=${encodeURIComponent(auctionType)}&page=${page}`,
-    "scheme": "https",
     "accept": "application/json, text/plain, */*",
     "accept-language": "en-GB,en-US;q=0.9,en;q=0.8",
     "artisio-client-id": clientId,
@@ -1164,12 +1173,13 @@ async function fetchArtisioHeadersCompliant(options: ArtisioRequestOptions): Pro
     "sec-fetch-dest": "empty",
     "sec-fetch-mode": "cors",
     "sec-fetch-site": "cross-site",
+    "Connection": "close",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
   };
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
 
     const res = await fetch(url, {
       method: "GET",
@@ -1648,14 +1658,15 @@ async function enrichEasyLiveTimedBidding(lots: any[]): Promise<any[]> {
         info = cached.data;
       } else {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2500);
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
 
         const res = await fetch("https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding", {
           method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
             "X-Requested-With": "XMLHttpRequest",
-            "User-Agent": "Mozilla/5.0"
+            "User-Agent": "Mozilla/5.0",
+            "Connection": "close"
           },
           body: "data=" + encodeURIComponent(JSON.stringify({ lot: lotHash, l: "0" })),
           signal: controller.signal
@@ -1742,15 +1753,22 @@ export async function fetchEasyLiveAuctionLots(keyword: string, hitsPerPage: num
       ]
     };
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-Algolia-Application-Id": "KBISTY43U6",
-        "X-Algolia-API-Key": "917b17098c0702d97a62a6ca8fc1f410"
+        "X-Algolia-API-Key": "917b17098c0702d97a62a6ca8fc1f410",
+        "Connection": "close",
+        "User-Agent": "Mozilla/5.0"
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       console.warn(`EasyLive Algolia fetch returned status ${res.status}`);
@@ -2312,7 +2330,8 @@ app.post("/api/proxy/easylive/timed-bid", async (req, res) => {
       headers: {
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         "X-Requested-With": "XMLHttpRequest",
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": "Mozilla/5.0",
+        "Connection": "close"
       },
       body: "data=" + encodeURIComponent(JSON.stringify({ lot: lotHash }))
     });
