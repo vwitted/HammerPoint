@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { motion } from "motion/react";
 import { useAuth } from "../context/AuthContext";
 import { WatchlistItem } from "../types";
-import { getTimeRemaining } from "./AuctionList";
+import { getTimeRemaining } from "../utils/lotDisplay";
 import { 
   X, 
   Star, 
