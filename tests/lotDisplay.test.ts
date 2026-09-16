@@ -59,9 +59,18 @@ describe("parseValidDate", () => {
     assert.equal(parseValidDate(null), null);
   });
 
-  it("returns null for text that isn't a date", { todo: 'appends the year, so "TBC" becomes "TBC 2026", which JavaScript reads as 1 January' }, () => {
+  it("returns null for text that isn't a date", () => {
     assert.equal(parseValidDate("TBC"), null);
     assert.equal(parseValidDate("Upcoming"), null);
+    assert.equal(parseValidDate("Lot 5"), null);
+    assert.equal(parseValidDate("Market 5"), null);
+  });
+
+  it("still reads short and numeric dates", () => {
+    assert.equal(parseValidDate("Wed, 09 Sep")?.getMonth(), 8);
+    assert.equal(parseValidDate("Sept 9, 2026")?.getDate(), 9);
+    assert.ok(parseValidDate("2026-10-01"));
+    assert.ok(parseValidDate("10/01/2026"));
   });
 });
 
@@ -88,7 +97,7 @@ describe("getTimeRemaining", () => {
     assert.equal(getTimeRemaining(inHours(0.25)).text, "15m left");
   });
 
-  it("shows the raw text when the end date can't be read", { todo: 'unreadable dates like "TBC" parse as 1 January and show "Bidding Closed"' }, () => {
+  it("shows the raw text when the end date can't be read", () => {
     assert.equal(getTimeRemaining("TBC").text, "TBC");
   });
 });

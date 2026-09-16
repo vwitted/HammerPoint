@@ -19,6 +19,10 @@ export interface EasyLiveHit {
   [key: string]: any;
 }
 
+// Only text that names a month or has a numeric date (e.g. 09/10, 2026-10-09) is treated as a date.
+// Without this, "TBC" becomes "TBC 2026", which JavaScript reads as 1 January.
+const LOOKS_LIKE_DATE = /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b|\d{1,4}[\/.-]\d{1,2}/i;
+
 export function normalizeEasyLiveLot(hit: EasyLiveHit, keyword: string = ""): any {
   const rawTitle = hit.description || "Auction Lot";
   const title = cleanHtmlText(rawTitle);
@@ -75,6 +79,7 @@ export function normalizeEasyLiveLot(hit: EasyLiveHit, keyword: string = ""): an
     let clean = raw.trim();
     // Strip leading day names (e.g. "Sun, ", "Wed, ")
     clean = clean.replace(/^[a-z]+,\s*/i, "");
+    if (!LOOKS_LIKE_DATE.test(clean)) return null;
     // Replace obsolete 2001 defaults with currentYear
     if (clean.includes("2001")) {
       clean = clean.replace("2001", String(currentYear));
