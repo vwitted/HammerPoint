@@ -16,8 +16,6 @@ import {
   collection, 
   onSnapshot, 
   deleteDoc,
-  query,
-  orderBy,
   addDoc
 } from "firebase/firestore";
 import { auth, googleProvider, db } from "../firebase";

@@ -8,16 +8,10 @@ import {
   X, 
   ShieldCheck, 
   Users, 
-  Activity, 
   Megaphone, 
-  Check, 
   Trash2, 
-  Crown, 
   RefreshCw, 
   Search,
-  Server,
-  Zap,
-  Plus
 } from "lucide-react";
 
 interface AdminPanelModalProps {
@@ -28,13 +22,12 @@ interface AdminPanelModalProps {
 export default function AdminPanelModal({ isOpen, onClose }: AdminPanelModalProps) {
   const { 
     isAdmin, 
-    userProfile, 
     announcements, 
     postAnnouncement, 
     deleteAnnouncement 
   } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<"users" | "announcements" | "health">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "announcements">("users");
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [userSearch, setUserSearch] = useState("");
@@ -134,7 +127,7 @@ export default function AdminPanelModal({ isOpen, onClose }: AdminPanelModalProp
                 </span>
               </div>
               <p className="text-xs text-indigo-300">
-                User membership governance, live broadcasts, and scraper telemetry
+                User membership governance and live broadcasts
               </p>
             </div>
           </div>
@@ -168,16 +161,6 @@ export default function AdminPanelModal({ isOpen, onClose }: AdminPanelModalProp
             }`}
           >
             <Megaphone className="w-4 h-4" /> Platform Broadcasts ({announcements.length})
-          </button>
-          <button
-            onClick={() => setActiveTab("health")}
-            className={`py-3 border-b-2 flex items-center gap-2 transition-colors ${
-              activeTab === "health"
-                ? "border-indigo-600 text-indigo-600 font-bold"
-                : "border-transparent hover:text-slate-900"
-            }`}
-          >
-            <Activity className="w-4 h-4" /> Scraper Feeds & Telemetry
           </button>
         </div>
 
@@ -378,66 +361,6 @@ export default function AdminPanelModal({ isOpen, onClose }: AdminPanelModalProp
             </div>
           )}
 
-          {/* TAB 3: HEALTH & TELEMETRY */}
-          {activeTab === "health" && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {/* Easy Live */}
-                <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-2xs space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800">Easy Live Auction</span>
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Active
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-500">
-                    Direct Algolia queries: <strong className="text-slate-800">KBISTY43U6</strong>
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-mono">Latency: ~210ms • Hits/req: 25</div>
-                </div>
-
-                {/* BPI / Artisio */}
-                <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-2xs space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800">BPI / Artisio API</span>
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Active
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-500">
-                    Artisio Cloud Feed: <strong className="text-slate-800">Client ID 77829366</strong>
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-mono">Latency: ~340ms • Subdomain: www</div>
-                </div>
-
-                {/* ATG Media Network */}
-                <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-2xs space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800">ATG Network (BidSpotter, The Saleroom)</span>
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Active
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-500">
-                    Live Puppeteer Crawler Engine
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-mono">Latency: ~3400ms • Dynamic Scraping</div>
-                </div>
-              </div>
-
-              {/* Database Status */}
-              <div className="p-4 rounded-xl border border-indigo-100 bg-indigo-50/50 space-y-2">
-                <div className="flex items-center gap-2">
-                  <Server className="w-4 h-4 text-indigo-600" />
-                  <span className="text-xs font-bold text-indigo-950">Firestore Clustered Storage Status</span>
-                </div>
-                <p className="text-xs text-indigo-900/80 leading-relaxed">
-                  Database ID: <code className="bg-white/80 px-1.5 py-0.5 rounded text-indigo-700 font-mono">ai-studio-commercialauctio-6bf36965-dd91-453f-bc59-8b000e523eaf</code>. 
-                  Rule version: 2 with RBAC validation for Administrator, Pro Buyer, and Standard accounts.
-                </p>
-              </div>
-            </div>
-          )}
         </div>
       </motion.div>
     </div>

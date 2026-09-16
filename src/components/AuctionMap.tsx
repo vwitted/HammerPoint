@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { APIProvider, Map, Marker, useMap } from "@vis.gl/react-google-maps";
-import { AuctionCluster, AuctionListing } from "../types";
-import { MapPin, Layers, Crosshair, ZoomIn, AlertTriangle } from "lucide-react";
+import { AuctionCluster } from "../types";
+import { MapPin, Layers, Crosshair, AlertTriangle } from "lucide-react";
 
 const API_KEY: string = import.meta.env.VITE_GOOGLE_MAPS_PLATFORM_KEY || "";
 
@@ -11,7 +11,6 @@ interface AuctionMapProps {
   clusters: AuctionCluster[];
   selectedCluster: AuctionCluster | null;
   onClusterSelect: (cluster: AuctionCluster | null) => void;
-  onListingSelect?: (listing: AuctionListing) => void;
 }
 
 // Controller component to smoothly center/zoom the map on prop changes
@@ -46,8 +45,7 @@ function MapController({ selectedCluster, clusters }: { selectedCluster: Auction
 export default function AuctionMap({
   clusters,
   selectedCluster,
-  onClusterSelect,
-  onListingSelect
+  onClusterSelect
 }: AuctionMapProps) {
   const [mapCenter, setMapCenter] = useState({ lat: 39.8283, lng: -98.5795 }); // Center of US
   const [mapZoom, setMapZoom] = useState(4);

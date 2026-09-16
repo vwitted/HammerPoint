@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 import { useAuth } from "../context/AuthContext";
-import { WatchlistItem, AuctionListing } from "../types";
+import { WatchlistItem } from "../types";
 import { getTimeRemaining } from "./AuctionList";
 import { 
   X, 
@@ -12,7 +12,6 @@ import {
   Download, 
   Clock, 
   Crown, 
-  FileText, 
   Coins, 
   Check,
   Building2
@@ -36,7 +35,6 @@ export default function WatchlistModal({
     removeFromWatchlist, 
     updateWatchlistItem,
     isPro,
-    role
   } = useAuth();
 
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);

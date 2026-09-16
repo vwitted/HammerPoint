@@ -11,8 +11,6 @@ import {
   ShieldCheck, 
   Check, 
   LogOut, 
-  Sparkles,
-  Zap
 } from "lucide-react";
 
 interface UserProfileModalProps {

@@ -2,11 +2,8 @@ import React, { useState } from "react";
 import { AuctionListing, AuctionCluster } from "../types";
 import { useAuth } from "../context/AuthContext";
 import { 
-  Calendar, 
   MapPin, 
   ExternalLink, 
-  Tag, 
-  Building2, 
   Clock, 
   AlertTriangle,
   ChevronDown,
@@ -19,7 +16,6 @@ interface AuctionListProps {
   listings: AuctionListing[];
   selectedCluster: AuctionCluster | null;
   onClusterSelect: (cluster: AuctionCluster | null) => void;
-  onListingSelect: (listing: AuctionListing) => void;
   onViewOnMap: (listing: AuctionListing) => void;
   activeSearchTerm: string;
   selectedCategory: string;

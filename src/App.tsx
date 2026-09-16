@@ -21,18 +21,13 @@ import {
   MapPin, 
   Globe,
   Info,
-  CheckCircle2,
-  ExternalLink,
   ChevronRight,
   Hammer,
   AlertTriangle,
   Bell,
   Star,
-  Crown,
   ShieldCheck,
-  User,
   LogIn,
-  LogOut,
   Compass,
   Megaphone,
   X
@@ -43,13 +38,11 @@ export default function App() {
   const { 
     currentUser, 
     userProfile, 
-    role, 
     isPro, 
     isAdmin, 
     watchlist, 
     searchAlerts, 
     announcements, 
-    signOutUser 
   } = useAuth();
 
   // Modal dialog states
@@ -385,30 +378,12 @@ export default function App() {
         eventSourceRef.current = null;
       };
     } catch (err: any) {
-      console.error("EventSource failed, attempting fallback POST:", err);
-      try {
-        const fallbackRes = await fetch("/api/auctions/search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ keyword: searchKw.trim(), closingDate: closingDateParam })
-        });
-        const fallbackData = await fallbackRes.json();
-        if (fallbackData.status === "success" && Array.isArray(fallbackData.data)) {
-          setListings((prev) => {
-            const existingIds = new Set(prev.map((item) => item.id));
-            const unique = fallbackData.data.filter((item: AuctionListing) => !existingIds.has(item.id));
-            return [...prev, ...unique];
-          });
-          if (fallbackData.breakdown) setSearchBreakdown(fallbackData.breakdown);
-          if (fallbackData.references) setSourceReferences(fallbackData.references);
-        }
-      } catch (fallbackErr: any) {
-        setScrapeError(fallbackErr.message || "Failed to query live auction catalogs.");
-      } finally {
-        setIsLoading(false);
-        setIsStreaming(false);
-        setScrapeStep("");
-      }
+      // Only reached if the URL is invalid; network errors surface through es.onerror.
+      console.error("Failed to open search stream:", err);
+      setScrapeError(err.message || "Failed to start the live search.");
+      setIsLoading(false);
+      setIsStreaming(false);
+      setScrapeStep("");
     }
   };
 
@@ -998,7 +973,6 @@ export default function App() {
               listings={finalDisplayListings}
               selectedCluster={selectedCluster}
               onClusterSelect={setSelectedCluster}
-              onListingSelect={(listing) => handleViewOnMap(listing)}
               onViewOnMap={(listing) => handleViewOnMap(listing)}
               activeSearchTerm={activeSearchTerm}
               selectedCategory={selectedCategory}
@@ -1015,7 +989,6 @@ export default function App() {
               clusters={computedClusters}
               selectedCluster={selectedCluster}
               onClusterSelect={setSelectedCluster}
-              onListingSelect={handleViewOnMap}
             />
           </div>
 
