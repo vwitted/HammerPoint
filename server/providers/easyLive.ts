@@ -1,4 +1,5 @@
 import { getCoordinatesForLocation } from "../lib/geo";
+import { categorizeByTitle } from "../lib/categories";
 import { cleanHtmlText } from "../lib/text";
 
 export interface EasyLiveHit {
@@ -142,19 +143,7 @@ export function normalizeEasyLiveLot(hit: EasyLiveHit, keyword: string = ""): an
   }
 
   // Extract category hints
-  let category = "General";
-  const lowerTitle = title.toLowerCase();
-  if (lowerTitle.includes("lathe") || lowerTitle.includes("milling") || lowerTitle.includes("cnc") || lowerTitle.includes("machinery") || lowerTitle.includes("generator") || lowerTitle.includes("press") || lowerTitle.includes("welder")) {
-    category = "Machinery";
-  } else if (lowerTitle.includes("catering") || lowerTitle.includes("oven") || lowerTitle.includes("freezer") || lowerTitle.includes("fryer") || lowerTitle.includes("restaurant")) {
-    category = "Catering";
-  } else if (lowerTitle.includes("car") || lowerTitle.includes("van") || lowerTitle.includes("truck") || lowerTitle.includes("trailer") || lowerTitle.includes("vehicle")) {
-    category = "Vehicles";
-  } else if (lowerTitle.includes("furniture") || lowerTitle.includes("table") || lowerTitle.includes("chair") || lowerTitle.includes("desk") || lowerTitle.includes("cabinet")) {
-    category = "Furniture";
-  } else if (lowerTitle.includes("laptop") || lowerTitle.includes("computer") || lowerTitle.includes("screen") || lowerTitle.includes("tech") || lowerTitle.includes("electronics")) {
-    category = "Electronics";
-  }
+  const category = categorizeByTitle(title, "General");
 
   // Derive auctioneer name from object ID or catalog
   const auctionHouseCode = (hit.objectID || "").split("_")[0] || "UK House";

@@ -1,31 +1,55 @@
 // Infer category based on lot title and details for US & UK auctions
 export function inferCategoryFromTitle(title: string, details?: string): string {
-  const text = `${title} ${details || ""}`.toLowerCase();
-  if (/biotech|genetic|dna|pcr|massarray|hplc|chromatograph|spectrom|analyzer|lab|medical|centrifuge|incubator|biometra/i.test(text)) {
+  const text = `${title} ${details || ""}`;
+  // Whole words only; \w* allows endings such as "robotic", "spectrometer", "machining".
+  const has = (pattern: string) => new RegExp(`\\b(${pattern})\\b`, "i").test(text);
+  if (has("biotech\\w*|genetic\\w*|dna|pcr|massarray|hplc|chromatograph\\w*|spectrom\\w*|analy[sz]ers?|labs?|laborator\\w*|medical|centrifuges?|incubators?|biometra")) {
     return "Laboratory & Biotech";
   }
-  if (/robot|robotic|automation|arm|vision system|actuator|motion control/i.test(text)) {
+  if (has("robot\\w*|automation|vision systems?|actuators?|motion control")) {
     return "Robotics & Automation";
   }
-  if (/server|switch|cisco|dell|optiplex|workstation|laptop|computer|networking|sfp|transceiver|nvme|ssd/i.test(text)) {
+  if (has("servers?|switch(es)?|cisco|dell|optiplex|workstations?|laptops?|computers?|networking|sfp|transceivers?|nvme|ssds?")) {
     return "IT & Telecom Equipment";
   }
-  if (/test|measurement|oscilloscope|keysight|agilent|tektronix|multimeter|analyzer|fluke/i.test(text)) {
+  if (has("test(er|ers|ing)?|measurement|oscilloscopes?|keysight|agilent|tektronix|multimeters?|fluke")) {
     return "Electronics & Test Equipment";
   }
-  if (/semiconductor|wafer|laser|optical|slide|lens|vacuum|chamber|plasma|mfa-cc/i.test(text)) {
+  if (has("semiconductors?|wafers?|lasers?|optical|slides?|lens(es)?|vacuum|chambers?|plasma|mfa-cc")) {
     return "Semiconductor & Photonics";
   }
-  if (/agriculture|crop|tractor|irrigation|climate|hvac|water treatment/i.test(text)) {
+  if (has("agricultur\\w*|crops?|tractors?|irrigation|climate|hvac|water treatment")) {
     return "Agricultural & Environmental";
   }
-  if (/car|auto|vehicle|truck|buick|classic car|fleet/i.test(text)) {
+  if (has("cars?|auto(mobile|motive)?s?|vehicles?|trucks?|buick|fleet")) {
     return "Vehicles & Fleet";
   }
-  if (/machin|cnc|lathe|mill|press|tool|drill|saw|warehouse|forklift/i.test(text)) {
+  if (has("machin\\w*|cnc|lathes?|mill(s|ing)?|press(es)?|tools?|drills?|saws?|warehouse|forklifts?")) {
     return "Industrial & Machinery";
   }
   return "Surplus Tech & Equipment";
+}
+
+// Keyword categories shared by the UK sources (BidSpotter, The Saleroom fallback, LiveAuctioneers,
+// Easy Live, BPI). Keywords match whole words (plurals allowed), so "table" doesn't match "stable"
+// and "car" doesn't match "card". The first matching category wins.
+const TITLE_CATEGORIES: [category: string, keywords: string[]][] = [
+  ["Machinery", ["lathe", "milling", "cnc", "machine", "machinery", "generator", "press", "welder", "welding", "saw", "compressor"]],
+  ["Catering", ["catering", "oven", "fridge", "freezer", "fryer", "cooker", "restaurant"]],
+  ["Vehicles", ["car", "van", "truck", "lorry", "trailer", "vehicle", "tractor", "forklift"]],
+  ["Furniture", ["furniture", "table", "chair", "armchair", "desk", "cabinet", "sofa"]],
+  ["Electronics", ["laptop", "computer", "screen", "monitor", "server", "tech", "electronic", "electronics", "phone"]],
+];
+
+const wordPattern = (words: string[]) => new RegExp(`\\b(${words.join("|")})(s|es)?\\b`, "i");
+const TITLE_CATEGORY_PATTERNS = TITLE_CATEGORIES.map(([category, words]) => [category, wordPattern(words)] as const);
+
+export function categorizeByTitle(title: string, fallback: string): string {
+  const text = title || "";
+  for (const [category, pattern] of TITLE_CATEGORY_PATTERNS) {
+    if (pattern.test(text)) return category;
+  }
+  return fallback;
 }
 
 // Helper to safely extract category string from diverse API payload structures
@@ -45,12 +69,5 @@ export function extractCategoryName(categoryField: any, titleHint: string = ""):
   }
 
   // Fallback to title keywords
-  const lower = (titleHint || "").toLowerCase();
-  if (lower.includes("lathe") || lower.includes("milling") || lower.includes("cnc") || lower.includes("machin") || lower.includes("press") || lower.includes("weld") || lower.includes("generator") || lower.includes("saw")) return "Machinery";
-  if (lower.includes("catering") || lower.includes("oven") || lower.includes("fridge") || lower.includes("freezer") || lower.includes("fryer") || lower.includes("cooker")) return "Catering";
-  if (lower.includes("car") || lower.includes("van") || lower.includes("truck") || lower.includes("trailer") || lower.includes("forklift") || lower.includes("vehicle")) return "Vehicles";
-  if (lower.includes("desk") || lower.includes("chair") || lower.includes("table") || lower.includes("cabinet") || lower.includes("furniture")) return "Furniture";
-  if (lower.includes("laptop") || lower.includes("computer") || lower.includes("screen") || lower.includes("server") || lower.includes("tech") || lower.includes("electronic")) return "Electronics";
-
-  return "General";
+  return categorizeByTitle(titleHint, "General");
 }

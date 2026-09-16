@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { cleanHtmlText } from "../server/lib/text.ts";
 import { getCoordinatesForLocation } from "../server/lib/geo.ts";
-import { extractCategoryName, inferCategoryFromTitle } from "../server/lib/categories.ts";
+import { categorizeByTitle, extractCategoryName, inferCategoryFromTitle } from "../server/lib/categories.ts";
 
 describe("cleanHtmlText", () => {
   it("strips tags, decodes common entities and collapses whitespace", () => {
@@ -53,10 +53,31 @@ describe("inferCategoryFromTitle", () => {
     assert.equal(inferCategoryFromTitle("Assorted boxes"), "Surplus Tech & Equipment");
   });
 
-  it("matches whole words only", { todo: '"lab" matches inside "table", "arm" inside "farm", "car" inside "card"' }, () => {
+  it("matches whole words only", () => {
     assert.notEqual(inferCategoryFromTitle("Oak dining table"), "Laboratory & Biotech");
     assert.notEqual(inferCategoryFromTitle("Farm gate"), "Robotics & Automation");
     assert.notEqual(inferCategoryFromTitle("Graphics card"), "Vehicles & Fleet");
+  });
+});
+
+describe("categorizeByTitle", () => {
+  it("matches whole words and plurals", () => {
+    assert.equal(categorizeByTitle("Myford lathe", "General"), "Machinery");
+    assert.equal(categorizeByTitle("Two office chairs", "General"), "Furniture");
+    assert.equal(categorizeByTitle("Victorian walnut armchairs", "General"), "Furniture");
+    assert.equal(categorizeByTitle("Ford Transit van", "General"), "Vehicles");
+  });
+
+  it("does not match keywords inside other words", () => {
+    assert.equal(categorizeByTitle("Espresso cups", "General"), "General");
+    assert.equal(categorizeByTitle("Carpet roll", "General"), "General");
+    assert.equal(categorizeByTitle("Graphics card", "General"), "General");
+    assert.equal(categorizeByTitle("Vanity unit", "General"), "General");
+    assert.equal(categorizeByTitle("Pepper mill", "General"), "General");
+  });
+
+  it("uses the caller's fallback when nothing matches", () => {
+    assert.equal(categorizeByTitle("Box of odds", "Industrial"), "Industrial");
   });
 });
 

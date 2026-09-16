@@ -1,4 +1,5 @@
 import puppeteer from "puppeteer";
+import { categorizeByTitle } from "../lib/categories";
 import { getCoordinatesForLocation } from "../lib/geo";
 
 // Dedicated BidSpotter UK scraper via Puppeteer
@@ -112,21 +113,7 @@ export function mapAtgRawLot(item: any, i: number, siteName: string, idPrefix: s
   const effectiveStart = item.openingBid != null ? item.openingBid : null;
   const effectiveBid = item.currentBid != null ? item.currentBid : effectiveStart;
 
-  let category = 'General';
-  const lowerTitle = item.title.toLowerCase();
-  if (lowerTitle.includes('lathe') || lowerTitle.includes('milling') || lowerTitle.includes('cnc') || lowerTitle.includes('machinery') || lowerTitle.includes('generator') || lowerTitle.includes('press') || lowerTitle.includes('welder')) {
-    category = 'Machinery';
-  } else if (lowerTitle.includes('catering') || lowerTitle.includes('oven') || lowerTitle.includes('freezer') || lowerTitle.includes('fryer') || lowerTitle.includes('restaurant')) {
-    category = 'Catering';
-  } else if (lowerTitle.includes('car') || lowerTitle.includes('van') || lowerTitle.includes('truck') || lowerTitle.includes('trailer') || lowerTitle.includes('vehicle') || lowerTitle.includes('tractor')) {
-    category = 'Vehicles';
-  } else if (lowerTitle.includes('furniture') || lowerTitle.includes('table') || lowerTitle.includes('chair') || lowerTitle.includes('desk') || lowerTitle.includes('cabinet') || lowerTitle.includes('sofa')) {
-    category = 'Furniture';
-  } else if (lowerTitle.includes('laptop') || lowerTitle.includes('computer') || lowerTitle.includes('screen') || lowerTitle.includes('tech') || lowerTitle.includes('electronics') || lowerTitle.includes('phone')) {
-    category = 'Electronics';
-  } else {
-    category = 'Industrial';
-  }
+  const category = categorizeByTitle(item.title, "Industrial");
 
   const auctioneer = item.auctioneer || siteName;
 

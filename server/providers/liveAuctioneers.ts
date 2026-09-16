@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { categorizeByTitle } from "../lib/categories";
 import { getCoordinatesForLocation } from "../lib/geo";
 
 // Dedicated LiveAuctioneers search via direct JSON API
@@ -73,21 +74,7 @@ export async function fetchLiveAuctioneersLots(keyword: string): Promise<any[]> 
       const country = item.lotLocationCountryCode === "GB" ? "UK" : (item.lotLocationCountryCode || "US");
       const coords = getCoordinatesForLocation(address, country);
 
-      let category = "General";
-      const lowerTitle = (item.title || "").toLowerCase();
-      if (lowerTitle.includes("lathe") || lowerTitle.includes("milling") || lowerTitle.includes("cnc") || lowerTitle.includes("machinery") || lowerTitle.includes("generator") || lowerTitle.includes("press") || lowerTitle.includes("welder")) {
-        category = "Machinery";
-      } else if (lowerTitle.includes("catering") || lowerTitle.includes("oven") || lowerTitle.includes("freezer") || lowerTitle.includes("fryer") || lowerTitle.includes("restaurant")) {
-        category = "Catering";
-      } else if (lowerTitle.includes("car") || lowerTitle.includes("van") || lowerTitle.includes("truck") || lowerTitle.includes("trailer") || lowerTitle.includes("vehicle") || lowerTitle.includes("tractor")) {
-        category = "Vehicles";
-      } else if (lowerTitle.includes("furniture") || lowerTitle.includes("table") || lowerTitle.includes("chair") || lowerTitle.includes("desk") || lowerTitle.includes("cabinet") || lowerTitle.includes("sofa")) {
-        category = "Furniture";
-      } else if (lowerTitle.includes("laptop") || lowerTitle.includes("computer") || lowerTitle.includes("screen") || lowerTitle.includes("tech") || lowerTitle.includes("electronics") || lowerTitle.includes("phone")) {
-        category = "Electronics";
-      } else {
-        category = "Industrial";
-      }
+      const category = categorizeByTitle(item.title || "", "Industrial");
 
       return {
         id: `la-${item.itemId}`,
