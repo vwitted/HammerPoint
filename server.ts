@@ -170,10 +170,24 @@ export async function scrapeBidspotterLots(keyword: string): Promise<any[]> {
   return await scrapeAtgPlatformLots('https://www.bidspotter.co.uk', 'BidSpotter', 'bidspotter', keyword);
 }
 
+const ATG_SCRAPE_TIMEOUT_MS = 45000;
+
 // Robust ATG Network browser scraper (used for BidSpotter and as fallback for The Saleroom)
 async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, idPrefix: string, keyword: string): Promise<any[]> {
   let browser: any = null;
-  const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 22000));
+  let timedOut = false;
+  let timeoutId: NodeJS.Timeout | undefined;
+  // Must exceed the page steps below (navigation up to 26s, then card wait + pricing settle),
+  // otherwise slow-but-successful pages return nothing. On timeout, close Chrome so it
+  // doesn't keep running in the background.
+  const timeoutPromise = new Promise<any[]>((resolve) => {
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      console.warn(`[${siteName}] Scraper timed out after ${ATG_SCRAPE_TIMEOUT_MS / 1000}s`);
+      if (browser) browser.close().catch(() => {});
+      resolve([]);
+    }, ATG_SCRAPE_TIMEOUT_MS);
+  });
 
   const scrapeTask = (async () => {
     try {
@@ -188,6 +202,11 @@ async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, idPrefix
         ],
         headless: true
       });
+      // The timeout may have fired while Chrome was still launching.
+      if (timedOut) {
+        await browser.close().catch(() => {});
+        return [];
+      }
 
       const page = await browser.newPage();
       await page.setViewport({ width: 1280, height: 800 });
@@ -381,7 +400,11 @@ async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, idPrefix
     }
   })();
 
-  return await Promise.race([scrapeTask, timeoutPromise]);
+  try {
+    return await Promise.race([scrapeTask, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 // Dedicated LiveAuctioneers search via direct JSON API
