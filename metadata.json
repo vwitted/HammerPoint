@@ -1,6 +1,0 @@
-{
-  "name": "Commercial Auction Map Scraper",
-  "description": "Commercial asset auction and liquidation aggregator with interactive regional map clustering, multi-role membership (Admin, Pro, Standard), personal watchlists, and live search alerts.",
-  "requestFramePermissions": ["geolocation"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

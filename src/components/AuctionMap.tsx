@@ -3,11 +3,7 @@ import { APIProvider, Map, Marker, useMap } from "@vis.gl/react-google-maps";
 import { AuctionCluster, AuctionListing } from "../types";
 import { MapPin, Layers, Crosshair, ZoomIn, AlertTriangle } from "lucide-react";
 
-const API_KEY =
-  process.env.GOOGLE_MAPS_PLATFORM_KEY ||
-  (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY ||
-  (globalThis as any).GOOGLE_MAPS_PLATFORM_KEY ||
-  "";
+const API_KEY: string = import.meta.env.VITE_GOOGLE_MAPS_PLATFORM_KEY || "";
 
 const hasValidKey = Boolean(API_KEY) && API_KEY !== "YOUR_API_KEY";
 
@@ -117,21 +113,14 @@ export default function AuctionMap({
 
         <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 text-left max-w-md w-full text-xs space-y-3 mb-6 font-mono text-slate-300">
           <p>
-            <span className="text-blue-400 font-bold">1.</span> <a href="https://console.cloud.google.com/google/maps-apis/start?utm_campaign=gmp-code-assist-ais" target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-300">Create a Google Maps API Key</a>
+            <span className="text-blue-400 font-bold">1.</span> <a href="https://console.cloud.google.com/google/maps-apis/start" target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-300">Create a Google Maps API Key</a>
           </p>
           <p>
-            <span className="text-blue-400 font-bold">2.</span> Open <strong className="text-white">Settings</strong> (⚙️ gear icon, top-right)
+            <span className="text-blue-400 font-bold">2.</span> Add it to your <code className="bg-slate-800 px-1.5 py-0.5 rounded text-blue-300">.env</code> file as <code className="bg-slate-800 px-1.5 py-0.5 rounded text-blue-300">VITE_GOOGLE_MAPS_PLATFORM_KEY</code>
           </p>
           <p>
-            <span className="text-blue-400 font-bold">3.</span> Add Secret name: <code className="bg-slate-800 px-1.5 py-0.5 rounded text-blue-300">GOOGLE_MAPS_PLATFORM_KEY</code>
+            <span className="text-blue-400 font-bold">3.</span> Restart the dev server (or rebuild for production)
           </p>
-          <p>
-            <span className="text-blue-400 font-bold">4.</span> Paste your API key as value and click <strong className="text-white">Enter</strong>
-          </p>
-        </div>
-
-        <div className="text-xs text-slate-500 italic">
-          The app will hot-rebuild automatically once the secret is applied.
         </div>
 
         {/* Beautiful fallback mock map representation to keep app functional */}
@@ -179,7 +168,7 @@ export default function AuctionMap({
             <span className="text-blue-400 font-bold">1.</span> Open the <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-300">Google Cloud Console Credentials Page</a>
           </p>
           <p>
-            <span className="text-blue-400 font-bold">2.</span> Click your API key name (e.g., <code className="bg-slate-800 px-1 py-0.5 rounded text-blue-300">GOOGLE_MAPS_PLATFORM_KEY</code>)
+            <span className="text-blue-400 font-bold">2.</span> Click your API key name (the one in <code className="bg-slate-800 px-1 py-0.5 rounded text-blue-300">VITE_GOOGLE_MAPS_PLATFORM_KEY</code>)
           </p>
           <p>
             <span className="text-blue-400 font-bold">3.</span> Scroll to the <strong className="text-white">API restrictions</strong> section at the bottom
@@ -225,7 +214,6 @@ export default function AuctionMap({
         <Map
           defaultCenter={mapCenter}
           defaultZoom={mapZoom}
-          internalUsageAttributionIds={["gmp_mcp_codeassist_v1_aistudio"]}
           style={{ width: "100%", height: "100%" }}
           disableDefaultUI={false}
           gestureHandling="cooperative"

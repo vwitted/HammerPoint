@@ -1,8 +1,6 @@
 import express from "express";
 import path from "path";
 import dotenv from "dotenv";
-import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
 import puppeteer from "puppeteer";
 import crypto from "crypto";
 import rateLimit from "express-rate-limit";
@@ -11,7 +9,7 @@ import { fetchPublicUrl, readBodyWithLimit, UnsafeUrlError } from "./server/safe
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -37,23 +35,6 @@ const imageProxyLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: false
 });
-
-// Shared Gemini SDK Client setup
-const apiKey = process.env.GEMINI_API_KEY;
-let ai: GoogleGenAI | null = null;
-
-if (apiKey) {
-  ai = new GoogleGenAI({
-    apiKey: apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      }
-    }
-  });
-} else {
-  console.warn("GEMINI_API_KEY is not set. Real-time scraping will fallback to simulated scraping.");
-}
 
 // In-Memory cache of real scraped auctions
 let activeAuctions: any[] = [];
@@ -2389,6 +2370,8 @@ app.post("/api/proxy/easylive/timed-bid", async (req, res) => {
 // Vite integration for dev server or static serving for production
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    // Loaded lazily so production doesn't need Vite installed.
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
