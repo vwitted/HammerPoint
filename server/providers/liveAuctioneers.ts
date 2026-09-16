@@ -1,0 +1,119 @@
+import crypto from "crypto";
+import { getCoordinatesForLocation } from "../lib/geo";
+
+// Dedicated LiveAuctioneers search via direct JSON API
+export async function fetchLiveAuctioneersLots(keyword: string): Promise<any[]> {
+  try {
+    const searchParameters = {
+      searchTerm: keyword,
+      page: 1,
+      pageSize: 36,
+      sort: "-relevance",
+      options: {
+        status: ["upcoming", "live", "online"]
+      },
+      skipAggs: true
+    };
+    const deviceId = crypto.randomUUID();
+    const url = `https://search-party-prod.liveauctioneers.com/search/v4/web?parameters=${encodeURIComponent(JSON.stringify(searchParameters))}&deviceId=${deviceId}`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "Connection": "close"
+      },
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      console.warn(`LiveAuctioneers search returned status: ${res.status}`);
+      return [];
+    }
+
+    const data: any = await res.json();
+    const items = data?.payload?.items || [];
+
+    return items.map((item: any) => {
+      const directUrl = item.slug
+        ? `https://www.liveauctioneers.com/item/${item.itemId}_${item.slug}`
+        : `https://www.liveauctioneers.com/item/${item.itemId}`;
+
+      const imgUrl = (item.sellerId && item.catalogId && item.itemId)
+        ? `https://p1.liveauctioneers.com/${item.sellerId}/${item.catalogId}/${item.itemId}_1_m.jpg`
+        : "";
+
+      const startPriceNum = Number(item.startPrice);
+      const startPrice = (!isNaN(startPriceNum) && startPriceNum > 0) ? startPriceNum : null;
+      
+      const leadingBidNum = Number(item.leadingBid);
+      const leadingBid = (!isNaN(leadingBidNum) && leadingBidNum > 0) ? leadingBidNum : null;
+      
+      const lowEstNum = Number(item.lowBidEstimate);
+      const lowEst = (!isNaN(lowEstNum) && lowEstNum > 0) ? lowEstNum : null;
+      
+      const highEstNum = Number(item.highBidEstimate);
+      const highEst = (!isNaN(highEstNum) && highEstNum > 0) ? highEstNum : null;
+      const sym = item.currency === "GBP" ? "£" : (item.currency === "EUR" ? "€" : "$");
+      const estimateStr = (lowEst && highEst) ? `${sym}${lowEst} - ${sym}${highEst}` : (lowEst ? `${sym}${lowEst}` : undefined);
+
+      const effectiveStart = startPrice != null ? startPrice : (lowEst != null ? lowEst : null);
+      const currentPrice = leadingBid != null ? leadingBid : effectiveStart;
+
+      const endingDate = (typeof item.lotEndTimeEstimatedTs === "number" && item.lotEndTimeEstimatedTs > 0)
+        ? new Date(item.lotEndTimeEstimatedTs * 1000).toISOString()
+        : (item.saleStartTs ? new Date(item.saleStartTs * 1000).toISOString() : "");
+
+      const locParts = [item.lotLocationCity, item.lotLocationRegion, item.lotLocationCountryCode].filter(Boolean);
+      const address = locParts.join(", ") || item.sellerName || "Online";
+      const country = item.lotLocationCountryCode === "GB" ? "UK" : (item.lotLocationCountryCode || "US");
+      const coords = getCoordinatesForLocation(address, country);
+
+      let category = "General";
+      const lowerTitle = (item.title || "").toLowerCase();
+      if (lowerTitle.includes("lathe") || lowerTitle.includes("milling") || lowerTitle.includes("cnc") || lowerTitle.includes("machinery") || lowerTitle.includes("generator") || lowerTitle.includes("press") || lowerTitle.includes("welder")) {
+        category = "Machinery";
+      } else if (lowerTitle.includes("catering") || lowerTitle.includes("oven") || lowerTitle.includes("freezer") || lowerTitle.includes("fryer") || lowerTitle.includes("restaurant")) {
+        category = "Catering";
+      } else if (lowerTitle.includes("car") || lowerTitle.includes("van") || lowerTitle.includes("truck") || lowerTitle.includes("trailer") || lowerTitle.includes("vehicle") || lowerTitle.includes("tractor")) {
+        category = "Vehicles";
+      } else if (lowerTitle.includes("furniture") || lowerTitle.includes("table") || lowerTitle.includes("chair") || lowerTitle.includes("desk") || lowerTitle.includes("cabinet") || lowerTitle.includes("sofa")) {
+        category = "Furniture";
+      } else if (lowerTitle.includes("laptop") || lowerTitle.includes("computer") || lowerTitle.includes("screen") || lowerTitle.includes("tech") || lowerTitle.includes("electronics") || lowerTitle.includes("phone")) {
+        category = "Electronics";
+      } else {
+        category = "Industrial";
+      }
+
+      return {
+        id: `la-${item.itemId}`,
+        title: item.title || "Auction Lot",
+        url: directUrl,
+        details: item.shortDescription || `Lot #${item.lotNumber || ""} by ${item.sellerName || "LiveAuctioneers"}.${estimateStr ? ` Estimate: ${estimateStr}.` : ""}`,
+        endingDate: endingDate || new Date(Date.now() + 5 * 86400000).toISOString(),
+        startDate: item.saleStartTs ? new Date(item.saleStartTs * 1000).toISOString() : new Date().toISOString(),
+        address: address,
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        auctioneer: item.sellerName || "LiveAuctioneers",
+        category: category,
+        country: country,
+        currency: sym,
+        currentPrice: currentPrice,
+        startPrice: effectiveStart,
+        bidLabel: leadingBid ? "Current Bid" : (effectiveStart ? "Starting Bid" : undefined),
+        estimateStr: estimateStr,
+        imageUrl: imgUrl || "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&q=80",
+        status: "active",
+        sourcePlatform: "LiveAuctioneers"
+      };
+    });
+  } catch (err: any) {
+    console.warn("Error in LiveAuctioneers fetch:", err.message);
+    return [];
+  }
+}

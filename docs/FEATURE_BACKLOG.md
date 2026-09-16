@@ -77,3 +77,14 @@ present but does nothing useful) · **Partial** (works, but less than the UI pro
 - **Watchlist price tracking** (Partial). A watchlist item stores the price at the moment you saved
   it plus your notes and max bid, but the price never updates.
   - *Seed of:* "outbid"/"price changed" alerts, comparing the current bid with your max bid.
+
+## Planned ideas (not started)
+
+- **Mobile (cellular) proxy for scraper requests.** A mobile proxy subscription is already paid for;
+  the service's API and docs haven't been reviewed yet. Idea: route outgoing scraper requests
+  through it so sites that block data-centre IPs keep working.
+  - *To decide once the docs are read:* which sources actually need it (the JSON/Algolia APIs may
+    not), how it plugs into both `fetch` and Puppeteer, IP rotation and sticky sessions, bandwidth
+    cost per search, and falling back to a direct connection if the proxy is down. Proxy
+    credentials belong in `.env`, never in code.
+  - Also worth checking each site's terms of use before relying on it.
