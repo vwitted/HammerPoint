@@ -73,14 +73,21 @@ export const usCoordinateLookup: Record<string, { latitude: number; longitude: n
   "ca": { latitude: 37.5841, longitude: -122.3661 }
 };
 
+// Matches a place name as whole words, so "hull" doesn't match "Solihull".
+const hasPlace = (text: string, place: string) =>
+  new RegExp(`\\b${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text);
+
+// "USA", or a US state code after a comma ("Santa Clara, CA"), but not "Leeds, Cambridgeshire".
+const US_ADDRESS = /\busa\b|,\s*(ca|nv|ma|tx|ut)\b/;
+
 // Helper to determine coordinates from address and country
 export function getCoordinatesForLocation(address: string, country: string = "UK"): { latitude: number; longitude: number } {
   const lowerAddress = (address || "").toLowerCase();
-  
+
   // If explicitly US or contains US indicators
-  if (country === "US" || lowerAddress.includes("usa") || lowerAddress.includes(", ca") || lowerAddress.includes(", nv") || lowerAddress.includes(", ma") || lowerAddress.includes(", tx") || lowerAddress.includes(", ut")) {
+  if (country === "US" || US_ADDRESS.test(lowerAddress)) {
     for (const [city, coords] of Object.entries(usCoordinateLookup)) {
-      if (lowerAddress.includes(city)) {
+      if (hasPlace(lowerAddress, city)) {
         return coords;
       }
     }
@@ -90,7 +97,7 @@ export function getCoordinatesForLocation(address: string, country: string = "UK
 
   // UK lookup
   for (const [city, coords] of Object.entries(ukCoordinateLookup)) {
-    if (lowerAddress.includes(city)) {
+    if (hasPlace(lowerAddress, city)) {
       return coords;
     }
   }

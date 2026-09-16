@@ -22,6 +22,11 @@ describe("getCoordinatesForLocation", () => {
     assert.deepEqual(getCoordinatesForLocation("Unit 4, Wakefield, West Yorkshire"), { latitude: 53.6829, longitude: -1.4912 });
   });
 
+  it("recognises US addresses by state code or USA", () => {
+    assert.deepEqual(getCoordinatesForLocation("Unit 5, Austin, TX 78701"), { latitude: 30.2672, longitude: -97.7431 });
+    assert.deepEqual(getCoordinatesForLocation("Reno, NV, USA"), { latitude: 39.5296, longitude: -119.8138 });
+  });
+
   it("finds known US cities when the country is US", () => {
     assert.deepEqual(getCoordinatesForLocation("Santa Clara, CA", "US"), { latitude: 37.3541, longitude: -121.9552 });
   });
@@ -31,12 +36,12 @@ describe("getCoordinatesForLocation", () => {
     assert.deepEqual(getCoordinatesForLocation("Somewhere unknown", "US"), { latitude: 37.5841, longitude: -122.3661 });
   });
 
-  it("keeps UK addresses in the UK", { todo: '", ca" in "Leeds, Cambridgeshire" is read as California' }, () => {
+  it("keeps UK addresses in the UK", () => {
     const coords = getCoordinatesForLocation("Unit 2, Leeds, Cambridgeshire");
     assert.ok(coords.longitude > -10 && coords.longitude < 2, "longitude within the UK");
   });
 
-  it("matches whole place names only", { todo: '"hull" matches inside "Solihull"' }, () => {
+  it("matches whole place names only", () => {
     const hull = getCoordinatesForLocation("Hull");
     assert.notDeepEqual(getCoordinatesForLocation("Solihull, West Midlands"), hull);
   });

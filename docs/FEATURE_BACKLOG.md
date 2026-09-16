@@ -80,6 +80,13 @@ present but does nothing useful) · **Partial** (works, but less than the UI pro
 
 ## Planned ideas (not started)
 
+- **Real geocoding for lot locations.** Map positions come from a hand-written table of about 30 US
+  and 35 UK places. Anything else lands on a default point (London, or Burlingame, California),
+  so most HiBid lots (all over the US) pile up in California, and every BidSpotter lot sits in London.
+  - *Options:* ZIP-code and UK-postcode lookup tables (free, offline, most addresses include one),
+    or a geocoding API (e.g. Google Geocoding) with results cached. Lots with no usable location
+    should be marked unknown rather than placed on a made-up point.
+
 - **Mobile (cellular) proxy for scraper requests.** A mobile proxy subscription is already paid for;
   the service's API and docs haven't been reviewed yet. Idea: route outgoing scraper requests
   through it so sites that block data-centre IPs keep working.
