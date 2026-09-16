@@ -5,6 +5,8 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import puppeteer from "puppeteer";
 import crypto from "crypto";
+import rateLimit from "express-rate-limit";
+import { fetchPublicUrl, readBodyWithLimit, UnsafeUrlError } from "./server/safeFetch";
 
 dotenv.config();
 
@@ -13,6 +15,28 @@ const PORT = 3000;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Behind a reverse proxy (most hosts), set TRUST_PROXY to the number of proxy hops so
+// rate limits apply per client instead of to the proxy's IP.
+if (process.env.TRUST_PROXY) {
+  app.set("trust proxy", Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY);
+}
+
+// Each live search starts several scrapers, up to three of them headless Chrome instances.
+const searchLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: Number(process.env.SEARCH_RATE_LIMIT_PER_MINUTE) || 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "Too many searches. Please wait a minute and try again." }
+});
+
+const imageProxyLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: Number(process.env.IMAGE_PROXY_RATE_LIMIT_PER_MINUTE) || 300,
+  standardHeaders: "draft-7",
+  legacyHeaders: false
+});
 
 // Shared Gemini SDK Client setup
 const apiKey = process.env.GEMINI_API_KEY;
@@ -1937,39 +1961,51 @@ app.get("/api/proxy/sources", async (req, res) => {
 });
 
 // GET: /api/proxy/image - Resilient proxy to stream auction images (ATG, Bidspotter, EasyLive) avoiding CDN 403 or referrer blocks
-app.get("/api/proxy/image", async (req, res) => {
-  const imageUrl = req.query.url as string;
-  if (!imageUrl || !imageUrl.startsWith("http")) {
+const FALLBACK_IMAGE_URL = "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&q=80";
+const MAX_PROXIED_IMAGE_BYTES = 10 * 1024 * 1024;
+// Raster formats only: SVG can carry script and would run on this app's origin.
+const PROXYABLE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"]);
+
+app.get("/api/proxy/image", imageProxyLimiter, async (req, res) => {
+  const imageUrl = typeof req.query.url === "string" ? req.query.url : "";
+  if (!imageUrl) {
     return res.status(400).send("Invalid image URL");
   }
 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
-    
-    // Parse host for custom referer
-    const origin = new URL(imageUrl).origin;
-    const upstreamRes = await fetch(imageUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-        "Referer": `${origin}/`
-      },
-      signal: controller.signal
-    });
-    clearTimeout(timeout);
 
-    if (!upstreamRes.ok) {
-      return res.redirect(302, "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&q=80");
+    try {
+      // Parse host for custom referer
+      const origin = new URL(imageUrl).origin;
+      const upstreamRes = await fetchPublicUrl(imageUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "image/avif,image/webp,image/apng,image/*;q=0.8",
+          "Referer": `${origin}/`
+        },
+        signal: controller.signal
+      });
+
+      const contentType = (upstreamRes.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      if (!upstreamRes.ok || !PROXYABLE_IMAGE_TYPES.has(contentType)) {
+        return res.redirect(302, FALLBACK_IMAGE_URL);
+      }
+
+      const body = await readBodyWithLimit(upstreamRes, MAX_PROXIED_IMAGE_BYTES);
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+      res.send(body);
+    } finally {
+      clearTimeout(timeout);
     }
-
-    const contentType = upstreamRes.headers.get("content-type") || "image/jpeg";
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "public, max-age=86400, immutable");
-    const buffer = await upstreamRes.arrayBuffer();
-    res.send(Buffer.from(buffer));
   } catch (err) {
-    res.redirect(302, "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&q=80");
+    if (err instanceof UnsafeUrlError) {
+      return res.status(400).send("Image URL not allowed");
+    }
+    res.redirect(302, FALLBACK_IMAGE_URL);
   }
 });
 
@@ -2135,7 +2171,7 @@ function normalizeAndStoreLots(rawItems: any[]): any[] {
 // GET: Progressive Server-Sent Events (SSE) stream for live asynchronous auction search
 // Allows the client to immediately render fast-returning APIs (LiveAuctioneers, EasyLive, BPI)
 // while longer scrapers (BidSpotter, The Saleroom, HiBid) continue processing in the background.
-app.get("/api/auctions/search-stream", async (req, res) => {
+app.get("/api/auctions/search-stream", searchLimiter, async (req, res) => {
   const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
   const closingDate = typeof req.query.closingDate === "string" ? req.query.closingDate.trim() : "";
 
@@ -2231,7 +2267,7 @@ app.get("/api/auctions/search-stream", async (req, res) => {
 });
 
 // POST: Real-time Multi-Source Web Scrape and API Search of US & UK Auction Sites
-app.post("/api/auctions/search", async (req, res) => {
+app.post("/api/auctions/search", searchLimiter, async (req, res) => {
   const { keyword, closingDate } = req.body;
 
   if (!keyword || typeof keyword !== "string") {

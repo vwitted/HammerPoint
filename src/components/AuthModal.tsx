@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useAuth } from "../context/AuthContext";
-import { UserRole } from "../types";
 import { 
   X, 
   Mail, 
@@ -9,18 +8,13 @@ import {
   User, 
   Building2, 
   ShieldCheck, 
-  Zap, 
-  Crown, 
-  Check, 
-  AlertCircle,
-  Sparkles,
-  ArrowRight
+  AlertCircle
 } from "lucide-react";
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  defaultTab?: "signin" | "signup" | "demo";
+  defaultTab?: "signin" | "signup";
 }
 
 export default function AuthModal({ isOpen, onClose, defaultTab = "signin" }: AuthModalProps) {
@@ -28,12 +22,11 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "signin" }: Au
     signInWithEmail, 
     signUpWithEmail, 
     signInWithGoogle, 
-    loginAsDemoPersona,
     authError, 
     clearAuthError 
   } = useAuth();
 
-  const [tab, setTab] = useState<"signin" | "signup" | "demo">(defaultTab);
+  const [tab, setTab] = useState<"signin" | "signup">(defaultTab);
   const [loading, setLoading] = useState(false);
 
   // Form states
@@ -41,7 +34,6 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "signin" }: Au
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [company, setCompany] = useState("");
-  const [selectedRole, setSelectedRole] = useState<UserRole>("standard");
   const [localError, setLocalError] = useState<string | null>(null);
 
   if (!isOpen) return null;
@@ -73,7 +65,7 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "signin" }: Au
     setLocalError(null);
     setLoading(true);
     try {
-      await signUpWithEmail(email, password, displayName, company, selectedRole);
+      await signUpWithEmail(email, password, displayName, company);
       onClose();
     } catch (err: any) {
       // Handled by context
@@ -90,16 +82,6 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "signin" }: Au
       onClose();
     } catch (err: any) {
       // Handled by context
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDemoLogin = async (role: UserRole) => {
-    setLoading(true);
-    try {
-      await loginAsDemoPersona(role);
-      onClose();
     } finally {
       setLoading(false);
     }
@@ -138,7 +120,7 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "signin" }: Au
         </div>
 
         {/* Tab Switcher */}
-        <div className="grid grid-cols-3 p-1.5 bg-slate-100 mx-5 mt-4 rounded-xl text-xs font-semibold text-slate-600">
+        <div className="grid grid-cols-2 p-1.5 bg-slate-100 mx-5 mt-4 rounded-xl text-xs font-semibold text-slate-600">
           <button
             onClick={() => {
               clearAuthError();
@@ -166,20 +148,6 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "signin" }: Au
             }`}
           >
             Register
-          </button>
-          <button
-            onClick={() => {
-              clearAuthError();
-              setLocalError(null);
-              setTab("demo");
-            }}
-            className={`py-2 rounded-lg transition-all flex items-center justify-center gap-1 ${
-              tab === "demo" 
-                ? "bg-amber-500 text-white shadow-xs font-bold" 
-                : "text-amber-700 hover:text-amber-900"
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" /> Fast Demo
           </button>
         </div>
 
@@ -311,46 +279,6 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "signin" }: Au
                 />
               </div>
 
-              {/* Membership Tier Picker */}
-              <div className="pt-2">
-                <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                  Select Initial Membership Tier:
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <div
-                    onClick={() => setSelectedRole("standard")}
-                    className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                      selectedRole === "standard"
-                        ? "border-blue-600 bg-blue-50/50 shadow-2xs"
-                        : "border-slate-200 hover:border-slate-300"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-800">Standard</span>
-                      {selectedRole === "standard" && <Check className="w-3.5 h-3.5 text-blue-600" />}
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-1">Free permanent access, 50-mile radius, 5 saved lots.</p>
-                  </div>
-
-                  <div
-                    onClick={() => setSelectedRole("pro")}
-                    className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                      selectedRole === "pro"
-                        ? "border-purple-600 bg-purple-50/50 shadow-2xs"
-                        : "border-slate-200 hover:border-slate-300"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-purple-900 flex items-center gap-1">
-                        <Crown className="w-3 h-3 text-amber-500" /> Pro Buyer
-                      </span>
-                      {selectedRole === "pro" && <Check className="w-3.5 h-3.5 text-purple-600" />}
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-1">Unlimited watchlists, 150+ mi radius, bid tracker & notes.</p>
-                  </div>
-                </div>
-              </div>
-
               <button
                 type="submit"
                 disabled={loading}
@@ -359,89 +287,6 @@ export default function AuthModal({ isOpen, onClose, defaultTab = "signin" }: Au
                 {loading ? "Creating Account..." : "Complete Registration"}
               </button>
             </form>
-          )}
-
-          {tab === "demo" && (
-            <div className="space-y-3">
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 leading-relaxed">
-                <strong className="block font-bold mb-0.5 flex items-center gap-1.5">
-                  <Zap className="w-3.5 h-3.5 text-amber-600" /> Instant Persona Testing
-                </strong>
-                Switch immediately into any membership role to test permissions, admin panels, and Pro buyer tools without needing to create new credentials.
-              </div>
-
-              {/* Persona 1: Admin */}
-              <div
-                onClick={() => handleDemoLogin("admin")}
-                className="p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/60 hover:bg-indigo-100/70 cursor-pointer transition-all group"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs">
-                      👑
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-indigo-950">Platform Administrator</h4>
-                      <p className="text-[11px] text-indigo-700">philiphall9019@gmail.com</p>
-                    </div>
-                  </div>
-                  <span className="text-xs font-bold text-indigo-600 group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
-                    Enter <ArrowRight className="w-3.5 h-3.5" />
-                  </span>
-                </div>
-                <div className="mt-2 text-[11px] text-indigo-800/80 bg-white/60 px-2.5 py-1 rounded-md">
-                  Full access: User management, role elevation, live announcements, and scraper diagnostics.
-                </div>
-              </div>
-
-              {/* Persona 2: Pro Buyer */}
-              <div
-                onClick={() => handleDemoLogin("pro")}
-                className="p-3.5 rounded-xl border border-purple-200 bg-purple-50/60 hover:bg-purple-100/70 cursor-pointer transition-all group"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-purple-600 text-white flex items-center justify-center font-bold text-xs">
-                      ⭐
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-purple-950">Commercial Pro Buyer</h4>
-                      <p className="text-[11px] text-purple-700">Northern Fleet Liquidations</p>
-                    </div>
-                  </div>
-                  <span className="text-xs font-bold text-purple-600 group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
-                    Enter <ArrowRight className="w-3.5 h-3.5" />
-                  </span>
-                </div>
-                <div className="mt-2 text-[11px] text-purple-800/80 bg-white/60 px-2.5 py-1 rounded-md">
-                  Pro access: 150+ mile nationwide radius, private bid notes, unlimited watchlist & CSV export.
-                </div>
-              </div>
-
-              {/* Persona 3: Standard Member */}
-              <div
-                onClick={() => handleDemoLogin("standard")}
-                className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 cursor-pointer transition-all group"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-slate-700 text-white flex items-center justify-center font-bold text-xs">
-                      🔰
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-900">Standard Buyer</h4>
-                      <p className="text-[11px] text-slate-500">Apex Machinery Repairs</p>
-                    </div>
-                  </div>
-                  <span className="text-xs font-bold text-slate-700 group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
-                    Enter <ArrowRight className="w-3.5 h-3.5" />
-                  </span>
-                </div>
-                <div className="mt-2 text-[11px] text-slate-600 bg-white/80 px-2.5 py-1 rounded-md">
-                  Standard access: 50-mile radius map, up to 5 saved watchlist lots.
-                </div>
-              </div>
-            </div>
           )}
         </div>
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { motion } from "motion/react";
 import { useAuth } from "../context/AuthContext";
 import { UserProfile, UserRole } from "../types";
-import { collection, getDocs, doc, updateDoc, setDoc } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { 
   X, 
@@ -56,47 +56,7 @@ export default function AdminPanelModal({ isOpen, onClose }: AdminPanelModalProp
         list.push({ uid: docSnap.id, ...(docSnap.data() as Omit<UserProfile, "uid">) });
       });
 
-      // If empty or initial, inject demo seeds for demonstration
-      if (list.length === 0) {
-        const seedUsers: UserProfile[] = [
-          {
-            uid: "user-seed-philip",
-            email: "philiphall9019@gmail.com",
-            displayName: "Philip Hall",
-            role: "admin",
-            company: "HammerPoint Platform Ops",
-            phone: "+44 (0) 7700 900123",
-            preferredRadius: 200,
-            createdAt: new Date(Date.now() - 15 * 86400000).toISOString()
-          },
-          {
-            uid: "user-seed-sarah",
-            email: "sarah.jenkins@northernequipment.co.uk",
-            displayName: "Sarah Jenkins",
-            role: "pro",
-            company: "Northern Fleet Liquidations",
-            phone: "+44 (0) 113 496 0288",
-            preferredRadius: 150,
-            createdAt: new Date(Date.now() - 8 * 86400000).toISOString()
-          },
-          {
-            uid: "user-seed-dave",
-            email: "dave.m@midlandsmachinery.com",
-            displayName: "Dave Miller",
-            role: "standard",
-            company: "Midlands Tool Hire",
-            phone: "+44 (0) 121 496 0991",
-            preferredRadius: 50,
-            createdAt: new Date(Date.now() - 2 * 86400000).toISOString()
-          }
-        ];
-        for (const u of seedUsers) {
-          await setDoc(doc(db, "users", u.uid), u);
-        }
-        setUsersList(seedUsers);
-      } else {
-        setUsersList(list);
-      }
+      setUsersList(list);
     } catch (err) {
       console.error("Failed fetching users from Firestore:", err);
     } finally {

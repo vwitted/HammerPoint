@@ -33,13 +33,11 @@ interface AuthContextType {
   authError: string | null;
   clearAuthError: () => void;
   signInWithEmail: (email: string, pass: string) => Promise<void>;
-  signUpWithEmail: (email: string, pass: string, displayName: string, company?: string, initialRole?: UserRole) => Promise<void>;
+  signUpWithEmail: (email: string, pass: string, displayName: string, company?: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signOutUser: () => Promise<void>;
-  updateProfileData: (data: Partial<UserProfile>) => Promise<void>;
-  switchUserRole: (newRole: UserRole) => Promise<void>;
-  loginAsDemoPersona: (personaRole: UserRole) => Promise<void>;
-  
+  updateProfileData: (data: Partial<Omit<UserProfile, "role">>) => Promise<void>;
+
   // Watchlist
   watchlist: WatchlistItem[];
   isLotWatchlisted: (lotId: string) => boolean;
@@ -60,17 +58,6 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-// Guest demo profile fallback
-const GUEST_PROFILE: UserProfile = {
-  uid: "guest",
-  email: "guest@commercialauctions.co.uk",
-  displayName: "Guest Observer",
-  role: "standard",
-  company: "Visitor",
-  preferredRadius: 50,
-  createdAt: new Date().toISOString()
-};
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -113,18 +100,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           if (snap.exists()) {
             setUserProfile(snap.data() as UserProfile);
           } else {
-            // Check if default admin email
-            const isAdminEmail = user.email?.toLowerCase() === "philiphall9019@gmail.com";
-            const initialRole: UserRole = isAdminEmail ? "admin" : "standard";
-            
+            // Every new account starts as standard. Roles are granted by an admin
+            // (Firestore rules reject any other initial role).
             const newProfile: UserProfile = {
               uid: user.uid,
               email: user.email || "",
               displayName: user.displayName || user.email?.split("@")[0] || "Commercial Buyer",
-              role: initialRole,
+              role: "standard",
               company: "",
               phone: "",
-              preferredRadius: initialRole === "admin" ? 200 : 50,
+              preferredRadius: 50,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString()
             };
@@ -133,12 +118,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           }
         } catch (err: any) {
           console.error("Error reading or writing user profile:", err);
-          // Fallback profile if Firestore read failed
+          // Fallback profile if Firestore read failed. Never grants elevated roles.
           setUserProfile({
             uid: user.uid,
             email: user.email || "user@example.com",
             displayName: user.displayName || "Buyer",
-            role: user.email?.toLowerCase() === "philiphall9019@gmail.com" ? "admin" : "standard",
+            role: "standard",
             preferredRadius: 50,
             createdAt: new Date().toISOString()
           });
@@ -256,9 +241,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signUpWithEmail = async (
     email: string, 
     pass: string, 
-    displayName: string, 
-    company?: string,
-    initialRole: UserRole = "standard"
+    displayName: string,
+    company?: string
   ) => {
     setAuthError(null);
     try {
@@ -271,10 +255,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         uid: user.uid,
         email: user.email || email,
         displayName: displayName || email.split("@")[0],
-        role: initialRole,
+        role: "standard",
         company: company || "",
         phone: "",
-        preferredRadius: initialRole === "pro" ? 150 : 50,
+        preferredRadius: 50,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -313,7 +297,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   // Update profile details
-  const updateProfileData = async (data: Partial<UserProfile>) => {
+  const updateProfileData = async (data: Partial<Omit<UserProfile, "role">>) => {
     if (!currentUser) return;
     try {
       const userDocRef = doc(db, "users", currentUser.uid);
@@ -327,54 +311,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error("Failed to update profile:", err);
       throw err;
     }
-  };
-
-  // Switch Role (Allows user or tester to upgrade to Pro, switch to Admin, etc.)
-  const switchUserRole = async (newRole: UserRole) => {
-    if (currentUser) {
-      await updateProfileData({ role: newRole });
-    } else {
-      // In guest demo mode, update local simulated profile
-      setUserProfile((prev) => prev ? { ...prev, role: newRole } : {
-        ...GUEST_PROFILE,
-        role: newRole
-      });
-    }
-  };
-
-  // Fast demo persona switcher for testing without email creation
-  const loginAsDemoPersona = async (personaRole: UserRole) => {
-    setAuthError(null);
-    let personaName = "Standard Buyer";
-    let company = "Apex Machinery Repairs";
-    let email = "standard.buyer@demo-auction.co.uk";
-    let radius = 50;
-
-    if (personaRole === "admin") {
-      personaName = "Philip Hall (Administrator)";
-      company = "HammerPoint Platform Ops";
-      email = "philiphall9019@gmail.com";
-      radius = 250;
-    } else if (personaRole === "pro") {
-      personaName = "Sarah Jenkins (Pro Bidder)";
-      company = "Northern Fleet Liquidations";
-      email = "sarah.jenkins@pro-plant.co.uk";
-      radius = 150;
-    }
-
-    const demoProfile: UserProfile = {
-      uid: `demo-${personaRole}-${Date.now().toString(36)}`,
-      email,
-      displayName: personaName,
-      role: personaRole,
-      company,
-      phone: "+44 (0) 113 496 0288",
-      preferredRadius: radius,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
-    setUserProfile(demoProfile);
   };
 
   // Watchlist helpers
@@ -558,8 +494,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         signInWithGoogle,
         signOutUser,
         updateProfileData,
-        switchUserRole,
-        loginAsDemoPersona,
         watchlist,
         isLotWatchlisted,
         addToWatchlist,

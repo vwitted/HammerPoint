@@ -54,7 +54,7 @@ export default function App() {
 
   // Modal dialog states
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authModalTab, setAuthModalTab] = useState<"signin" | "signup" | "demo">("signin");
+  const [authModalTab, setAuthModalTab] = useState<"signin" | "signup">("signin");
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isWatchlistOpen, setIsWatchlistOpen] = useState(false);
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
@@ -602,17 +602,6 @@ export default function App() {
               >
                 <LogIn className="w-3.5 h-3.5" /> Sign In
               </button>
-
-              <button
-                onClick={() => {
-                  setAuthModalTab("demo");
-                  setIsAuthModalOpen(true);
-                }}
-                className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 text-xs font-bold transition-colors cursor-pointer"
-                title="Explore instantly with 1-click Demo Personas"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-600" /> Demo
-              </button>
             </div>
           )}
         </div>
@@ -827,12 +816,8 @@ export default function App() {
                   return (
                     <button
                       key={option.value}
+                      disabled={!isAvailable}
                       onClick={() => {
-                        if (!isAvailable) {
-                          setAuthModalTab("demo");
-                          setIsAuthModalOpen(true);
-                          return;
-                        }
                         setCustomRadius(option.value);
                         setSelectedCluster(null);
                       }}
@@ -841,9 +826,9 @@ export default function App() {
                           ? "bg-slate-900 text-white shadow-xs"
                           : isAvailable
                             ? "bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-800 cursor-pointer"
-                            : "bg-slate-50 text-slate-400 cursor-pointer border border-dashed border-slate-200 hover:bg-purple-50 hover:text-purple-600"
+                            : "bg-slate-50 text-slate-400 cursor-not-allowed border border-dashed border-slate-200"
                       }`}
-                      title={!isAvailable ? "Click to unlock Pro Membership" : option.desc}
+                      title={!isAvailable ? "Pro membership required" : option.desc}
                     >
                       {option.label} {!isAvailable && "🔒"}
                     </button>

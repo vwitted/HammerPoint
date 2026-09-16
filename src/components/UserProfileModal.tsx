@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { motion } from "motion/react";
 import { useAuth } from "../context/AuthContext";
-import { UserRole } from "../types";
 import { 
   X, 
   User, 
@@ -29,7 +28,6 @@ export default function UserProfileModal({ isOpen, onClose, onOpenAdminPanel }: 
     isPro, 
     isAdmin, 
     updateProfileData, 
-    switchUserRole, 
     signOutUser 
   } = useAuth();
 
@@ -59,10 +57,6 @@ export default function UserProfileModal({ isOpen, onClose, onOpenAdminPanel }: 
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleTierSwitch = async (newRole: UserRole) => {
-    await switchUserRole(newRole);
   };
 
   return (
@@ -135,11 +129,10 @@ export default function UserProfileModal({ isOpen, onClose, onOpenAdminPanel }: 
             <div className="grid grid-cols-3 gap-2">
               {/* Standard */}
               <div
-                onClick={() => handleTierSwitch("standard")}
-                className={`p-3 rounded-xl border text-center cursor-pointer transition-all ${
+                className={`p-3 rounded-xl border text-center transition-all ${
                   role === "standard"
                     ? "border-blue-600 bg-blue-50/60 shadow-2xs"
-                    : "border-slate-200 hover:border-slate-300 opacity-70"
+                    : "border-slate-200 opacity-70"
                 }`}
               >
                 <div className="text-sm font-bold text-slate-800">Standard</div>
@@ -152,11 +145,10 @@ export default function UserProfileModal({ isOpen, onClose, onOpenAdminPanel }: 
 
               {/* Pro */}
               <div
-                onClick={() => handleTierSwitch("pro")}
-                className={`p-3 rounded-xl border text-center cursor-pointer transition-all ${
+                className={`p-3 rounded-xl border text-center transition-all ${
                   role === "pro"
                     ? "border-purple-600 bg-purple-50/60 shadow-2xs"
-                    : "border-slate-200 hover:border-slate-300 opacity-70"
+                    : "border-slate-200 opacity-70"
                 }`}
               >
                 <div className="text-sm font-bold text-purple-900 flex items-center justify-center gap-1">
@@ -171,11 +163,10 @@ export default function UserProfileModal({ isOpen, onClose, onOpenAdminPanel }: 
 
               {/* Admin */}
               <div
-                onClick={() => handleTierSwitch("admin")}
-                className={`p-3 rounded-xl border text-center cursor-pointer transition-all ${
+                className={`p-3 rounded-xl border text-center transition-all ${
                   role === "admin"
                     ? "border-indigo-600 bg-indigo-50/60 shadow-2xs"
-                    : "border-slate-200 hover:border-slate-300 opacity-70"
+                    : "border-slate-200 opacity-70"
                 }`}
               >
                 <div className="text-sm font-bold text-indigo-950 flex items-center justify-center gap-1">
@@ -188,6 +179,9 @@ export default function UserProfileModal({ isOpen, onClose, onOpenAdminPanel }: 
                 )}
               </div>
             </div>
+            <p className="text-[11px] text-slate-500">
+              Membership tiers are assigned by an administrator.
+            </p>
           </div>
 
           {/* Profile Form */}
