@@ -17,8 +17,8 @@
     "status": "Active",
     "country": "US",
     "currency": "$",
-    "currentPrice": 0,
-    "startPrice": 0,
+    "currentPrice": null,
+    "startPrice": null,
     "sourcePlatform": "HiBid"
   },
   {
@@ -127,8 +127,8 @@
     "status": "Active",
     "country": "US",
     "currency": "$",
-    "currentPrice": 0,
-    "startPrice": 0,
+    "currentPrice": null,
+    "startPrice": null,
     "sourcePlatform": "HiBid"
   },
   {
@@ -149,8 +149,8 @@
     "status": "Active",
     "country": "US",
     "currency": "$",
-    "currentPrice": 0,
-    "startPrice": 0,
+    "currentPrice": null,
+    "startPrice": null,
     "sourcePlatform": "HiBid"
   },
   {
@@ -215,8 +215,8 @@
     "status": "Active",
     "country": "US",
     "currency": "$",
-    "currentPrice": 0,
-    "startPrice": 0,
+    "currentPrice": null,
+    "startPrice": null,
     "sourcePlatform": "HiBid"
   },
   {
@@ -259,8 +259,8 @@
     "status": "Active",
     "country": "US",
     "currency": "$",
-    "currentPrice": 0,
-    "startPrice": 0,
+    "currentPrice": null,
+    "startPrice": null,
     "sourcePlatform": "HiBid"
   }
 ]

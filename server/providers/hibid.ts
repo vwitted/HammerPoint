@@ -233,7 +233,9 @@ export async function scrapeHibidLots(keyword: string = "", closingDate: string 
 
           const bidMatch = t.match(/(?:Current Bid|Opening Bid|High Bid|Bid):?\s*(?:£|GBP|€|\$)?\s*([0-9,]+(?:\.\d{2})?)/i) ||
                            t.match(/(?:£|GBP|€|\$)\s*([0-9,]+(?:\.\d{2})?)/);
-          const price = bidMatch ? parseFloat(bidMatch[1].replace(/,/g, "")) : null;
+          // "High Bid: 0.00" means nobody has bid yet: treat as no price rather than 0.
+          const parsedPrice = bidMatch ? parseFloat(bidMatch[1].replace(/,/g, "")) : NaN;
+          const price = parsedPrice > 0 ? parsedPrice : null;
 
           lotsRaw.push({
             lotId,
@@ -286,7 +288,9 @@ export async function scrapeHibidLots(keyword: string = "", closingDate: string 
           const lotNumber = lotMatch ? lotMatch[1] : "";
 
           const bidMatch = text.match(/(?:Current Bid|Opening Bid|High Bid|Bid):?\s*(?:£|GBP|€|\$)?\s*([0-9,]+(?:\.\d{2})?)/i) || text.match(/(?:£|GBP|€|\$)\s*([0-9,]+(?:\.\d{2})?)/);
-          const price = bidMatch ? parseFloat(bidMatch[1].replace(/,/g, "")) : null;
+          // "High Bid: 0.00" means nobody has bid yet: treat as no price rather than 0.
+          const parsedPrice = bidMatch ? parseFloat(bidMatch[1].replace(/,/g, "")) : NaN;
+          const price = parsedPrice > 0 ? parsedPrice : null;
 
           const idMatch = href.match(/\/lot\/(\d+)/);
           const lotId = idMatch ? idMatch[1] : (lotNumber || Math.random().toString(36).substring(2, 8));

@@ -26,8 +26,8 @@ async function runWithFixture(fixture: string, task: () => Promise<any[]>) {
 }
 
 const isIsoDate = (v: unknown) => typeof v === "string" && !Number.isNaN(Date.parse(v)) && v.endsWith("Z");
-// Prices may be missing, but never negative or NaN. (0 still appears; see the HiBid todo test.)
-const isValidPriceOrNull = (v: unknown) => v === null || v === undefined || (typeof v === "number" && Number.isFinite(v) && v >= 0);
+// Prices may be missing, but are never 0, negative or NaN.
+const isValidPriceOrNull = (v: unknown) => v === null || v === undefined || (typeof v === "number" && Number.isFinite(v) && v > 0);
 
 function assertValidListings(lots: any[], expectedCount: number) {
   assert.equal(lots.length, expectedCount, "number of lots parsed");
@@ -107,7 +107,7 @@ describe("HiBid", () => {
     assertMatchesSnapshot("hibid", lots);
   });
 
-  it("stores lots with no bids as unpriced rather than 0", { todo: "HiBid tiles say \"High Bid: 0.00\" when nobody has bid; the scraper stores that as 0" }, async () => {
+  it("stores lots with no bids as unpriced rather than 0", async () => {
     const { lots } = await runWithFixture("hibid", () => scrapeHibidLots("lathe", ""));
     assert.ok(lots.every((l) => l.currentPrice !== 0 && l.startPrice !== 0));
   });
