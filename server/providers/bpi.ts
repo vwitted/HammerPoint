@@ -1,4 +1,5 @@
 import puppeteer from "puppeteer";
+import { closeBrowserOnCancel, withCancel } from "../lib/cancel";
 import { getCoordinatesForLocation } from "../lib/geo";
 import { cleanHtmlText } from "../lib/text";
 import { extractCategoryName } from "../lib/categories";
@@ -14,7 +15,7 @@ export interface ArtisioRequestOptions {
 }
 
 // Request-header-compliant fetch wrapper for Artisio / BPI Auctions
-export async function fetchArtisioHeadersCompliant(options: ArtisioRequestOptions): Promise<any> {
+export async function fetchArtisioHeadersCompliant(options: ArtisioRequestOptions, cancelSignal?: AbortSignal): Promise<any> {
   const q = options.q || "";
   const clientId = options.clientId || "77829366";
   const lotStatus = options.lotStatus || "published";
@@ -51,7 +52,7 @@ export async function fetchArtisioHeadersCompliant(options: ArtisioRequestOption
     const res = await fetch(url, {
       method: "GET",
       headers: compliantHeaders,
-      signal: controller.signal
+      signal: withCancel(controller.signal, cancelSignal)
     });
 
     clearTimeout(timeoutId);
@@ -66,17 +67,19 @@ export async function fetchArtisioHeadersCompliant(options: ArtisioRequestOption
     console.warn(`Artisio direct fetch failed (${fetchErr.message}). Attempting Puppeteer fallback.`);
   }
 
-  // Fallback: Puppeteer browser fetch if direct fetch is blocked
+  // Fallback: Puppeteer browser fetch if direct fetch is blocked (not if the search was cancelled)
+  if (cancelSignal?.aborted) return { lots: { count: 0, results: [] } };
   try {
-    return await fetchArtisioViaPuppeteer(url, clientId, originUrl, refererUrl);
+    return await fetchArtisioViaPuppeteer(url, clientId, originUrl, refererUrl, cancelSignal);
   } catch {
     return { lots: { count: 0, results: [] } };
   }
 }
 
 // Puppeteer fallback execution for Artisio requests in environments where Chrome is available
-export async function fetchArtisioViaPuppeteer(targetUrl: string, clientId: string, originUrl: string, refererUrl: string): Promise<any> {
+export async function fetchArtisioViaPuppeteer(targetUrl: string, clientId: string, originUrl: string, refererUrl: string, cancelSignal?: AbortSignal): Promise<any> {
   let browser: any = null;
+  let stopClosingOnCancel = () => {};
   try {
     browser = await puppeteer.launch({
       headless: true,
@@ -88,6 +91,7 @@ export async function fetchArtisioViaPuppeteer(targetUrl: string, clientId: stri
         "--disable-gpu"
       ]
     });
+    stopClosingOnCancel = closeBrowserOnCancel(browser, cancelSignal);
 
     const page = await browser.newPage();
     await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
@@ -119,6 +123,7 @@ export async function fetchArtisioViaPuppeteer(targetUrl: string, clientId: stri
     console.warn("Puppeteer Artisio fallback notice:", puppeteerErr.message);
     return { lots: { count: 0, results: [] } };
   } finally {
+    stopClosingOnCancel();
     if (browser) {
       await browser.close().catch(() => {});
     }
@@ -247,19 +252,20 @@ export function normalizeArtisioLot(lot: any, keyword: string = ""): any {
 }
 
 // Scrape multiple pages from Artisio for full result coverage
-export async function scrapeBpiLots(keyword: string, maxPages: number = 3): Promise<any[]> {
+export async function scrapeBpiLots(keyword: string, maxPages: number = 3, cancelSignal?: AbortSignal): Promise<any[]> {
   try {
     const allLots: any[] = [];
     const seenUuids = new Set<string>();
 
     for (let page = 1; page <= maxPages; page++) {
+      if (cancelSignal?.aborted) break;
       const data = await fetchArtisioHeadersCompliant({
         q: keyword,
         clientId: "77829366",
         lotStatus: "published",
         auctionType: "all",
         page: page
-      });
+      }, cancelSignal);
 
       const rawResults = data?.lots?.results || [];
       if (rawResults.length === 0) break;

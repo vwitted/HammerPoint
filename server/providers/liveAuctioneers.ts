@@ -1,9 +1,10 @@
 import crypto from "crypto";
+import { withCancel } from "../lib/cancel";
 import { categorizeByTitle } from "../lib/categories";
 import { getCoordinatesForLocation } from "../lib/geo";
 
 // Dedicated LiveAuctioneers search via direct JSON API
-export async function fetchLiveAuctioneersLots(keyword: string): Promise<any[]> {
+export async function fetchLiveAuctioneersLots(keyword: string, cancelSignal?: AbortSignal): Promise<any[]> {
   try {
     const searchParameters = {
       searchTerm: keyword,
@@ -27,7 +28,7 @@ export async function fetchLiveAuctioneersLots(keyword: string): Promise<any[]> 
         "Accept": "application/json",
         "Connection": "close"
       },
-      signal: controller.signal
+      signal: withCancel(controller.signal, cancelSignal)
     });
     clearTimeout(timeoutId);
 

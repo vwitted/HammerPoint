@@ -1,4 +1,5 @@
 import { getCoordinatesForLocation } from "../lib/geo";
+import { withCancel } from "../lib/cancel";
 import { categorizeByTitle } from "../lib/categories";
 import { cleanHtmlText } from "../lib/text";
 
@@ -183,7 +184,7 @@ export function normalizeEasyLiveLot(hit: EasyLiveHit, keyword: string = ""): an
 export const easyLiveBidCache = new Map<string, { timestamp: number; data: any }>();
 
 // Enrich Easy Live Auction lots with live starting bid and real-time dates from doRefreshTimedBidding
-export async function enrichEasyLiveTimedBidding(lots: any[]): Promise<any[]> {
+export async function enrichEasyLiveTimedBidding(lots: any[], cancelSignal?: AbortSignal): Promise<any[]> {
   // Target lots that have a valid EasyLive lot URL
   const targetLots = lots.filter(lot => 
     lot.url &&
@@ -217,7 +218,7 @@ export async function enrichEasyLiveTimedBidding(lots: any[]): Promise<any[]> {
             "Connection": "close"
           },
           body: "data=" + encodeURIComponent(JSON.stringify({ lot: lotHash, l: "0" })),
-          signal: controller.signal
+          signal: withCancel(controller.signal, cancelSignal)
         });
         clearTimeout(timeoutId);
 
@@ -288,7 +289,7 @@ export async function enrichEasyLiveTimedBidding(lots: any[]): Promise<any[]> {
 }
 
 // Fetch lots from Easy Live Auction via Algolia Search API
-export async function fetchEasyLiveAuctionLots(keyword: string, hitsPerPage: number = 20, page: number = 0): Promise<any[]> {
+export async function fetchEasyLiveAuctionLots(keyword: string, hitsPerPage: number = 20, page: number = 0, cancelSignal?: AbortSignal): Promise<any[]> {
   try {
     const url = "https://KBISTY43U6-dsn.algolia.net/1/indexes/*/queries";
     const body = {
@@ -314,7 +315,7 @@ export async function fetchEasyLiveAuctionLots(keyword: string, hitsPerPage: num
         "User-Agent": "Mozilla/5.0"
       },
       body: JSON.stringify(body),
-      signal: controller.signal
+      signal: withCancel(controller.signal, cancelSignal)
     });
     clearTimeout(timeoutId);
 
@@ -326,7 +327,7 @@ export async function fetchEasyLiveAuctionLots(keyword: string, hitsPerPage: num
     const data = await res.json();
     const hits: EasyLiveHit[] = data.results?.[0]?.hits || [];
     const lots = hits.map(hit => normalizeEasyLiveLot(hit, keyword));
-    return await enrichEasyLiveTimedBidding(lots);
+    return await enrichEasyLiveTimedBidding(lots, cancelSignal);
   } catch (err: any) {
     console.error("Easy Live Auction fetch error:", err.message);
     return [];

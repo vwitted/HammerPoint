@@ -3,8 +3,8 @@ import { categorizeByTitle } from "../lib/categories";
 import { getCoordinatesForLocation } from "../lib/geo";
 
 // Dedicated BidSpotter UK scraper via Puppeteer
-export async function scrapeBidspotterLots(keyword: string): Promise<any[]> {
-  return await scrapeAtgPlatformLots('https://www.bidspotter.co.uk', 'BidSpotter', 'bidspotter', keyword);
+export async function scrapeBidspotterLots(keyword: string, cancelSignal?: AbortSignal): Promise<any[]> {
+  return await scrapeAtgPlatformLots('https://www.bidspotter.co.uk', 'BidSpotter', 'bidspotter', keyword, cancelSignal);
 }
 
 // Runs inside the search results page (via page.evaluate) and extracts one raw record per lot card.
@@ -149,21 +149,28 @@ export function mapAtgRawLot(item: any, i: number, siteName: string, idPrefix: s
 export const ATG_SCRAPE_TIMEOUT_MS = 45000;
 
 // Robust ATG Network browser scraper (used for BidSpotter and as fallback for The Saleroom)
-export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, idPrefix: string, keyword: string): Promise<any[]> {
+export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, idPrefix: string, keyword: string, cancelSignal?: AbortSignal): Promise<any[]> {
+  if (cancelSignal?.aborted) return [];
+
   let browser: any = null;
-  let timedOut = false;
+  let stopped = false;
   let timeoutId: NodeJS.Timeout | undefined;
-  // Must exceed the page steps below (navigation up to 26s, then card wait + pricing settle),
-  // otherwise slow-but-successful pages return nothing. On timeout, close Chrome so it
-  // doesn't keep running in the background.
-  const timeoutPromise = new Promise<any[]>((resolve) => {
-    timeoutId = setTimeout(() => {
-      timedOut = true;
-      console.warn(`[${siteName}] Scraper timed out after ${ATG_SCRAPE_TIMEOUT_MS / 1000}s`);
+  let stop: (reason: string) => void = () => {};
+  // The timeout must exceed the page steps below (navigation up to 26s, then card wait + pricing
+  // settle), otherwise slow-but-successful pages return nothing. On timeout or cancellation,
+  // close Chrome so it doesn't keep running in the background.
+  const stopPromise = new Promise<any[]>((resolve) => {
+    stop = (reason: string) => {
+      if (stopped) return;
+      stopped = true;
+      console.warn(`[${siteName}] Scraper stopped: ${reason}`);
       if (browser) browser.close().catch(() => {});
       resolve([]);
-    }, ATG_SCRAPE_TIMEOUT_MS);
+    };
+    timeoutId = setTimeout(() => stop(`timed out after ${ATG_SCRAPE_TIMEOUT_MS / 1000}s`), ATG_SCRAPE_TIMEOUT_MS);
   });
+  const onCancel = () => stop("cancelled");
+  cancelSignal?.addEventListener("abort", onCancel, { once: true });
 
   const scrapeTask = (async () => {
     try {
@@ -178,8 +185,8 @@ export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, i
         ],
         headless: true
       });
-      // The timeout may have fired while Chrome was still launching.
-      if (timedOut) {
+      // The timeout or cancellation may have happened while Chrome was still launching.
+      if (stopped) {
         await browser.close().catch(() => {});
         return [];
       }
@@ -237,8 +244,9 @@ export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, i
   })();
 
   try {
-    return await Promise.race([scrapeTask, timeoutPromise]);
+    return await Promise.race([scrapeTask, stopPromise]);
   } finally {
     clearTimeout(timeoutId);
+    cancelSignal?.removeEventListener("abort", onCancel);
   }
 }

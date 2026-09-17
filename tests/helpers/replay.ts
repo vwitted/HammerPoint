@@ -39,11 +39,17 @@ export function loadFixture(name: string): RecordedRequest[] {
 export function startReplay(requests: RecordedRequest[]) {
   const table = new Map(requests.map((r) => [normalizeKey(r.key), r]));
   const unmatched: string[] = [];
+  // Every request attempted, including ones refused because their signal was already aborted.
+  const attempted: string[] = [];
 
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     const key = requestKey(url, init);
+    attempted.push(key);
+    if (init?.signal?.aborted) {
+      throw new DOMException("This operation was aborted", "AbortError");
+    }
     const hit = table.get(key);
     if (!hit) {
       unmatched.push(key);
@@ -66,6 +72,7 @@ export function startReplay(requests: RecordedRequest[]) {
 
   return {
     unmatched,
+    attempted,
     stop() {
       globalThis.fetch = realFetch;
       globalThis.Date = RealDate;

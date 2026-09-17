@@ -1,7 +1,8 @@
 import { scrapeAtgPlatformLots } from "./atg";
+import { withCancel } from "../lib/cancel";
 
 // High-performance search for The Saleroom via Algolia InstantSearch API with Puppeteer fallback
-export async function scrapeTheSaleroomLots(keyword: string): Promise<any[]> {
+export async function scrapeTheSaleroomLots(keyword: string, cancelSignal?: AbortSignal): Promise<any[]> {
   const appId = '2125HT9M59';
   const apiKey = 'b1f48e75f522cc67ff7751f1abd75458';
   const url = `https://${appId}-dsn.algolia.net/1/indexes/lots_sr_en/query`;
@@ -31,7 +32,7 @@ export async function scrapeTheSaleroomLots(keyword: string): Promise<any[]> {
         'User-Agent': 'Mozilla/5.0'
       },
       body: JSON.stringify(body),
-      signal: controller.signal
+      signal: withCancel(controller.signal, cancelSignal)
     });
     clearTimeout(timeoutId);
     if (!res.ok) throw new Error(`Algolia query status: ${res.status}`);
@@ -92,5 +93,5 @@ export async function scrapeTheSaleroomLots(keyword: string): Promise<any[]> {
   }
 
   // Fallback to Puppeteer for The Saleroom if Algolia query yields 0 or fails
-  return await scrapeAtgPlatformLots('https://www.the-saleroom.com', 'The Saleroom', 'saleroom', keyword);
+  return await scrapeAtgPlatformLots('https://www.the-saleroom.com', 'The Saleroom', 'saleroom', keyword, cancelSignal);
 }

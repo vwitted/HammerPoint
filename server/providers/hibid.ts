@@ -1,13 +1,13 @@
 import puppeteer from "puppeteer";
+import { closeBrowserOnCancel, withCancel } from "../lib/cancel";
 import { getCoordinatesForLocation } from "../lib/geo";
 import { inferCategoryFromTitle } from "../lib/categories";
 
-// In-memory cache for HiBid scrape results and single lot details
-export const hibidLotsCache = new Map<string, { timestamp: number; lots: any[] }>();
+// In-memory cache for single lot details (search results are cached by the search cache)
 export const hibidDetailCache = new Map<string, { timestamp: number; detail: any }>();
 
 // Fast scrape of upcoming auctions & featured lots from svdisposition.com
-export async function scrapeSvdUpcomingAuctions(keyword?: string): Promise<any[]> {
+export async function scrapeSvdUpcomingAuctions(keyword?: string, cancelSignal?: AbortSignal): Promise<any[]> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -16,7 +16,7 @@ export async function scrapeSvdUpcomingAuctions(keyword?: string): Promise<any[]
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Connection": "close"
       },
-      signal: controller.signal
+      signal: withCancel(controller.signal, cancelSignal)
     });
     clearTimeout(timeoutId);
     if (!res.ok) return [];
@@ -102,7 +102,7 @@ export async function scrapeSvdUpcomingAuctions(keyword?: string): Promise<any[]
 }
 
 // Fetch comprehensive single lot information from hibid.com/lot/:lotId
-export async function fetchHibidLotDetail(lotId: string): Promise<any | null> {
+export async function fetchHibidLotDetail(lotId: string, cancelSignal?: AbortSignal): Promise<any | null> {
   if (!lotId) return null;
   const cleanId = lotId.replace(/^hibid-/, "");
   const cached = hibidDetailCache.get(cleanId);
@@ -120,7 +120,7 @@ export async function fetchHibidLotDetail(lotId: string): Promise<any | null> {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9"
       },
-      signal: controller.signal
+      signal: withCancel(controller.signal, cancelSignal)
     });
     clearTimeout(timeoutId);
     if (!res.ok) return null;
@@ -168,15 +168,10 @@ export async function fetchHibidLotDetail(lotId: string): Promise<any | null> {
 
 // Scrape active lots directly across HiBid using global search url:
 // https://hibid.com/lots?q={query_term}&miles=-1&status=ALL&closingDate={YYYY-MM-DD}
-export async function scrapeHibidLots(keyword: string = "", closingDate: string = ""): Promise<any[]> {
+export async function scrapeHibidLots(keyword: string = "", closingDate: string = "", cancelSignal?: AbortSignal): Promise<any[]> {
   const queryTerm = (keyword || "").trim();
   const cleanClosing = (closingDate || "").trim();
-  const cacheKey = `${queryTerm.toLowerCase()}::${cleanClosing}`;
-  
-  const cached = hibidLotsCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < 10 * 60 * 1000) {
-    return cached.lots;
-  }
+  const logKey = `${queryTerm.toLowerCase()}::${cleanClosing}`;
 
   // Exact URL requested by the user with unlimited distance (miles=-1) and closingDate filter
   let targetUrl = `https://hibid.com/lots?q=${encodeURIComponent(queryTerm)}&miles=-1&status=ALL`;
@@ -198,7 +193,7 @@ export async function scrapeHibidLots(keyword: string = "", closingDate: string 
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9"
       },
-      signal: controller.signal
+      signal: withCancel(controller.signal, cancelSignal)
     });
     clearTimeout(timeoutId);
 
@@ -252,15 +247,17 @@ export async function scrapeHibidLots(keyword: string = "", closingDate: string 
     console.warn("[HiBid Global Scraper] Direct fetch failed or timed out:", directErr.message);
   }
 
-  // 2. Fallback to Puppeteer if direct fetch didn't capture lots
-  if (lotsRaw.length === 0) {
+  // 2. Fallback to Puppeteer if direct fetch didn't capture lots (not if the search was cancelled)
+  if (lotsRaw.length === 0 && !cancelSignal?.aborted) {
     let browser = null;
+    let stopClosingOnCancel = () => {};
     try {
       console.log(`[HiBid Global Scraper] Launching Puppeteer fallback for ${targetUrl}`);
       browser = await puppeteer.launch({
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
       });
+      stopClosingOnCancel = closeBrowserOnCancel(browser, cancelSignal);
       const page = await browser.newPage();
       await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
       await page.goto(targetUrl, { waitUntil: "networkidle2", timeout: 25000 });
@@ -309,6 +306,7 @@ export async function scrapeHibidLots(keyword: string = "", closingDate: string 
     } catch (pupErr: any) {
       console.warn("[HiBid Global Scraper] Puppeteer fallback error:", pupErr.message);
     } finally {
+      stopClosingOnCancel();
       if (browser) {
         await browser.close().catch(() => {});
       }
@@ -357,7 +355,7 @@ export async function scrapeHibidLots(keyword: string = "", closingDate: string 
   if (parsedListings.length > 0) {
     const enrichBatch = parsedListings.slice(0, 12).map(async (item) => {
       try {
-        const detail = await fetchHibidLotDetail(item.lotId);
+        const detail = await fetchHibidLotDetail(item.lotId, cancelSignal);
         if (detail) {
           if (detail.company) {
             item.auctioneer = detail.company;
@@ -387,18 +385,30 @@ export async function scrapeHibidLots(keyword: string = "", closingDate: string 
     await Promise.race([Promise.allSettled(enrichBatch), enrichTimeout]);
   }
 
-  hibidLotsCache.set(cacheKey, { timestamp: Date.now(), lots: parsedListings });
-  console.log(`[HiBid Global Scraper] Extracted and cached ${parsedListings.length} lots for query "${cacheKey}"`);
+  console.log(`[HiBid Global Scraper] Extracted ${parsedListings.length} lots for query "${logKey}"`);
   return parsedListings;
 }
 
-// Timeout wrapper ensuring HiBid search never blocks for more than 30 seconds
-export async function scrapeHibidLotsWithTimeout(keyword: string = "", closingDate: string = ""): Promise<any[]> {
-  const timeoutPromise = new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 30000));
+const HIBID_SEARCH_TIMEOUT_MS = 30000;
+
+// Timeout wrapper ensuring HiBid search never blocks for more than 30 seconds. On timeout the
+// search is also cancelled, so its requests and any Chrome fallback stop instead of running on.
+export async function scrapeHibidLotsWithTimeout(keyword: string = "", closingDate: string = "", cancelSignal?: AbortSignal): Promise<any[]> {
+  const timeout = new AbortController();
+  const signal = withCancel(timeout.signal, cancelSignal);
+  let timeoutId: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<any[]>((resolve) => {
+    timeoutId = setTimeout(() => {
+      timeout.abort();
+      resolve([]);
+    }, HIBID_SEARCH_TIMEOUT_MS);
+  });
   try {
-    return await Promise.race([scrapeHibidLots(keyword, closingDate), timeoutPromise]);
+    return await Promise.race([scrapeHibidLots(keyword, closingDate, signal), timeoutPromise]);
   } catch (err: any) {
     console.warn("HiBid scraper timeout/error:", err.message);
     return [];
+  } finally {
+    clearTimeout(timeoutId);
   }
 }

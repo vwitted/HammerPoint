@@ -19,7 +19,7 @@ async function runWithFixture(fixture: string, task: () => Promise<any[]>) {
   const replay = startReplay(loadFixture(fixture));
   try {
     const lots = await task();
-    return { lots, unmatched: replay.unmatched };
+    return { lots, unmatched: replay.unmatched, attempted: replay.attempted };
   } finally {
     replay.stop();
   }
@@ -128,6 +128,30 @@ describe("Silicon Valley Disposition", () => {
     assert.ok(all.length > 0);
     assert.equal(lots.length, 0);
   });
+});
+
+describe("cancellation", () => {
+  // A search whose caller has gone away must return promptly without contacting the site
+  // (and without falling back to launching Chrome).
+  const cancelled = () => AbortSignal.abort();
+  const cases: [string, string, (signal: AbortSignal) => Promise<any[]>][] = [
+    ["LiveAuctioneers", "liveAuctioneers", (signal) => fetchLiveAuctioneersLots("lathe", signal)],
+    ["The Saleroom", "theSaleroom", (signal) => scrapeTheSaleroomLots("lathe", signal)],
+    ["Easy Live", "easyLive", (signal) => fetchEasyLiveAuctionLots("lathe", 35, 0, signal)],
+    ["BPI", "bpi", (signal) => scrapeBpiLots("", 2, signal)],
+    ["HiBid", "hibid", (signal) => scrapeHibidLots("lathe", "", signal)],
+    ["SVD", "svd", (signal) => scrapeSvdUpcomingAuctions("", signal)],
+  ];
+
+  for (const [name, fixture, run] of cases) {
+    it(`${name} returns no lots and makes no successful requests once cancelled`, async () => {
+      const started = Date.now();
+      const { lots, attempted } = await runWithFixture(fixture, () => run(cancelled()));
+      assert.deepEqual(lots, []);
+      assert.ok(attempted.length <= 1, `at most one refused request, got ${attempted.length}`);
+      assert.ok(Date.now() - started < 1000, "returns promptly");
+    });
+  }
 });
 
 describe("replay helper", () => {
