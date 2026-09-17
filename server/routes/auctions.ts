@@ -23,7 +23,7 @@ export function registerAuctionRoutes(app: Express, searchLimiter: RequestHandle
         const initialHibid = hibidLots.status === "fulfilled" ? hibidLots.value : [];
         
         for (const item of [...initialHibid, ...initialSvd]) {
-          if (!activeAuctions.some(existing => existing.id === item.id || existing.title.toLowerCase() === item.title.toLowerCase())) {
+          if (!activeAuctions.some(existing => existing.id === item.id)) {
             activeAuctions.push(item);
           }
         }

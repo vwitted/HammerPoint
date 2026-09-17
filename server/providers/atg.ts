@@ -107,6 +107,12 @@ export const ATG_EXTRACT_LOTS_SCRIPT = `(() => {
   return results;
 })()`;
 
+// Stable id from the lot URL (".../lot-<uuid>"), so the same lot gets the same id on every search.
+function atgLotId(url: string, idPrefix: string, index: number): string {
+  const match = (url || "").match(/\/lot-([a-z0-9-]+)/i);
+  return match ? `${idPrefix}-${match[1].toLowerCase()}` : `${idPrefix}-${Date.now()}-${index}`;
+}
+
 // Converts one raw lot card record (from ATG_EXTRACT_LOTS_SCRIPT) into a listing.
 export function mapAtgRawLot(item: any, i: number, siteName: string, idPrefix: string) {
   const exactCoords = getCoordinatesForLocation('United Kingdom');
@@ -118,7 +124,7 @@ export function mapAtgRawLot(item: any, i: number, siteName: string, idPrefix: s
   const auctioneer = item.auctioneer || siteName;
 
   return {
-    id: `${idPrefix}-${Date.now()}-${i}`,
+    id: atgLotId(item.url, idPrefix, i),
     title: item.title,
     url: item.url,
     details: item.description || `Lot ${item.lotNumber ? '#' + item.lotNumber : ''} from ${auctioneer}.${item.estimateStr ? ` Estimate: ${item.estimateStr}.` : ''}${effectiveStart ? ` Starting bid: ${item.currency}${effectiveStart}.` : ''}`,

@@ -28,7 +28,7 @@ export function normalizeAndStoreLots(rawItems: any[]): any[] {
       item.startPrice = item.currentPrice;
     }
 
-    if (!activeAuctions.some(existing => existing.id === item.id || existing.title.toLowerCase() === item.title.toLowerCase())) {
+    if (!activeAuctions.some(existing => existing.id === item.id)) {
       activeAuctions.push(item);
     }
   });

@@ -57,6 +57,9 @@ describe("ATG lot card extraction (BidSpotter page)", () => {
     try {
       const lots = raw.map((item, i) => mapAtgRawLot(item, i, "BidSpotter", "bidspotter"));
       assert.ok(lots.every((l) => l.sourcePlatform === "BidSpotter" && l.country === "UK"));
+      assert.ok(lots.every((l) => /^bidspotter-[0-9a-f-]{36}$/.test(l.id)), "ids come from the lot URL");
+      const again = raw.map((item, i) => mapAtgRawLot(item, i + 100, "BidSpotter", "bidspotter"));
+      assert.deepEqual(again.map((l) => l.id), lots.map((l) => l.id), "same lot, same id");
       assertMatchesSnapshot("bidspotter", { raw, lots });
     } finally {
       replay.stop();

@@ -67,7 +67,7 @@ describe("normalizeAndStoreLots: cache", () => {
     assert.equal(activeAuctions.length, 1);
   });
 
-  it("keeps different lots that share a title", { todo: 'the cache drops lots whose title matches one already stored (e.g. two lots called "Lathe")' }, () => {
+  it("keeps different lots that share a title", () => {
     normalizeAndStoreLots([lot({ id: "a", title: "Lathe" }), lot({ id: "b", title: "Lathe" })]);
     assert.equal(activeAuctions.length, 2);
   });
