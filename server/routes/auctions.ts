@@ -1,5 +1,6 @@
 import type { Express, RequestHandler } from "express";
-import { activeAuctions, normalizeAndStoreLots } from "../listingStore";
+import { applyPriceFallbacks } from "../lib/prices";
+import { SearchCache } from "../searchCache";
 import { fetchLiveAuctioneersLots } from "../providers/liveAuctioneers";
 import { fetchEasyLiveAuctionLots } from "../providers/easyLive";
 import { scrapeBpiLots } from "../providers/bpi";
@@ -7,32 +8,49 @@ import { scrapeHibidLotsWithTimeout, scrapeSvdUpcomingAuctions } from "../provid
 import { scrapeBidspotterLots } from "../providers/atg";
 import { scrapeTheSaleroomLots } from "../providers/theSaleroom";
 
+// Search results per source + query. Shared by all visitors; see server/searchCache.ts.
+const searchCache = new SearchCache<any>({
+  ttlMs: 10 * 60_000,
+  emptyTtlMs: 60_000,
+  maxEntries: 200,
+});
+
+// Aborts when the client disconnects before the response has finished (e.g. pressed Stop).
+function abortOnDisconnect(res: { on(event: "close", cb: () => void): unknown; writableFinished: boolean }): AbortSignal {
+  const controller = new AbortController();
+  res.on("close", () => {
+    if (!res.writableFinished) controller.abort();
+  });
+  return controller.signal;
+}
+
+// Lots listed by id once, keeping the first occurrence.
+function uniqueById(lots: any[]): any[] {
+  const seen = new Set<string>();
+  return lots.filter((lot) => !seen.has(lot.id) && seen.add(lot.id));
+}
+
 export function registerAuctionRoutes(app: Express, searchLimiter: RequestHandler) {
-  // GET: Retrieve all active auctions (real scraped data only)
+  // GET: Starter set of lots for the first page load (HiBid + Silicon Valley Disposition), cached.
   app.get("/api/auctions", async (req, res) => {
     try {
-      // If activeAuctions is empty, seed with immediate real US upcoming auctions and active lots
-      if (activeAuctions.length === 0) {
-        console.log("[Auctions API] Initializing live auction cache with US & UK lots...");
+      const signal = abortOnDisconnect(res);
+      const lots = await searchCache.get("featured", async (loadSignal) => {
+        console.log("[Auctions API] Loading featured US lots...");
         const [svdAuctions, hibidLots] = await Promise.allSettled([
-          scrapeSvdUpcomingAuctions(),
-          scrapeHibidLotsWithTimeout("")
+          scrapeSvdUpcomingAuctions(undefined, loadSignal),
+          scrapeHibidLotsWithTimeout("", "", loadSignal)
         ]);
-
         const initialSvd = svdAuctions.status === "fulfilled" ? svdAuctions.value : [];
         const initialHibid = hibidLots.status === "fulfilled" ? hibidLots.value : [];
-        
-        for (const item of [...initialHibid, ...initialSvd]) {
-          if (!activeAuctions.some(existing => existing.id === item.id)) {
-            activeAuctions.push(item);
-          }
-        }
-      }
+        return uniqueById([...initialHibid, ...initialSvd]);
+      }, signal);
+      if (signal.aborted) return;
 
       res.json({
         status: "success",
-        count: activeAuctions.length,
-        data: activeAuctions
+        count: lots.length,
+        data: lots
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch live auctions" });
@@ -57,9 +75,11 @@ export function registerAuctionRoutes(app: Express, searchLimiter: RequestHandle
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders?.();
 
+    const cancelSignal = abortOnDisconnect(res);
     let isConnected = true;
-    req.on("close", () => {
+    cancelSignal.addEventListener("abort", () => {
       isConnected = false;
+      console.log(`[Search] "${keyword}" cancelled: client disconnected`);
     });
 
     const sendEvent = (event: string, data: any) => {
@@ -83,12 +103,12 @@ export function registerAuctionRoutes(app: Express, searchLimiter: RequestHandle
       references: searchReferences
     });
 
-    const runProvider = async (id: string, name: string, task: () => Promise<any[]>) => {
+    const runProvider = async (id: string, name: string, task: (signal: AbortSignal) => Promise<any[]>, cacheKeyExtra = "") => {
       if (!isConnected) return;
       sendEvent("provider_status", { provider: id, name, status: "searching" });
       try {
-        const raw = await task();
-        const lots = normalizeAndStoreLots(raw);
+        const cacheKey = `${id}:${keyword.toLowerCase()}${cacheKeyExtra}`;
+        const lots = await searchCache.get(cacheKey, async (signal) => applyPriceFallbacks(await task(signal)), cancelSignal);
         if (!isConnected) return;
         sendEvent("provider_results", {
           provider: id,
@@ -112,18 +132,18 @@ export function registerAuctionRoutes(app: Express, searchLimiter: RequestHandle
     };
 
     const tasks = [
-      runProvider("liveAuctioneers", "LiveAuctioneers", () => fetchLiveAuctioneersLots(keyword)),
-      runProvider("easyLiveAuction", "Easy Live Auction", () => fetchEasyLiveAuctionLots(keyword, 35, 0)),
-      runProvider("bpiAuctions", "BPI Auctions", () => scrapeBpiLots(keyword, 2)),
-      runProvider("hibidSvd", "HiBid / SVD", async () => {
+      runProvider("liveAuctioneers", "LiveAuctioneers", (signal) => fetchLiveAuctioneersLots(keyword, signal)),
+      runProvider("easyLiveAuction", "Easy Live Auction", (signal) => fetchEasyLiveAuctionLots(keyword, 35, 0, signal)),
+      runProvider("bpiAuctions", "BPI Auctions", (signal) => scrapeBpiLots(keyword, 2, signal)),
+      runProvider("hibidSvd", "HiBid / SVD", async (signal) => {
         const [hLots, sLots] = await Promise.all([
-          scrapeHibidLotsWithTimeout(keyword, closingDate),
-          scrapeSvdUpcomingAuctions(keyword)
+          scrapeHibidLotsWithTimeout(keyword, closingDate, signal),
+          scrapeSvdUpcomingAuctions(keyword, signal)
         ]);
         return [...hLots, ...sLots];
-      }),
-      runProvider("bidspotter", "BidSpotter", () => scrapeBidspotterLots(keyword)),
-      runProvider("theSaleroom", "The Saleroom", () => scrapeTheSaleroomLots(keyword))
+      }, `:${closingDate}`),
+      runProvider("bidspotter", "BidSpotter", (signal) => scrapeBidspotterLots(keyword, signal)),
+      runProvider("theSaleroom", "The Saleroom", (signal) => scrapeTheSaleroomLots(keyword, signal))
     ];
 
     await Promise.allSettled(tasks);

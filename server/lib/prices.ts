@@ -1,8 +1,6 @@
-// In-Memory cache of real scraped auctions
-export const activeAuctions: any[] = [];
-
-// Helper to normalize and save newly scraped lots to the live active database
-export function normalizeAndStoreLots(rawItems: any[]): any[] {
+// Fills in missing starting/current prices from each other or from the low estimate.
+// Mutates and returns the given lots.
+export function applyPriceFallbacks(rawItems: any[]): any[] {
   if (!Array.isArray(rawItems)) return [];
   rawItems.forEach((item: any) => {
     // If estimate is present and starting/current prices are missing,
@@ -26,10 +24,6 @@ export function normalizeAndStoreLots(rawItems: any[]): any[] {
       if (!item.bidLabel) item.bidLabel = "Starting Bid";
     } else if ((item.startPrice == null || item.startPrice === 0) && typeof item.currentPrice === "number" && item.currentPrice > 0) {
       item.startPrice = item.currentPrice;
-    }
-
-    if (!activeAuctions.some(existing => existing.id === item.id)) {
-      activeAuctions.push(item);
     }
   });
   return rawItems;
