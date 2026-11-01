@@ -11,6 +11,7 @@ Auction aggregator: an Express server scrapes UK/US auction sites and streams re
 - `npm run test:rules`: Firestore security rules tests in the emulator (needs Java)
 - `npm run test:update-snapshots`: rewrite provider snapshots after an intended output change
 - `npm run build` / `npm start`: production build (client to `dist/`, server to `build/`)
+- `docker build -t hammerpoint .`: production image incl. Chrome; see `docs/DEPLOYMENT.md`
 
 Before finishing any change: `npm run lint && npm test`. If you touched `firestore.rules`, also
 `npm run test:rules`.
@@ -26,6 +27,7 @@ Before finishing any change: `npm run lint && npm test`. If you touched `firesto
 - `src/`: React app; pure display logic lives in `src/utils/` so it can be tested
 - `tests/fixtures/providers/`: real responses recorded from each site
 - `docs/FEATURE_BACKLOG.md`: removed/inactive features and planned ideas
+- `docs/DEPLOYMENT.md`: Docker image and hosting notes
 
 ## Rules
 
