@@ -65,7 +65,7 @@ export default function WatchlistModal({
       `"${(item.title || "").replace(/"/g, '""')}"`,
       `"${(item.auctioneer || "").replace(/"/g, '""')}"`,
       `"${(item.location || "").replace(/"/g, '""')}"`,
-      item.price || 0,
+      item.price && item.price > 0 ? item.price : "",
       `"${item.endingDate || ""}"`,
       item.myMaxBid || "",
       `"${(item.notes || "").replace(/"/g, '""')}"`,
@@ -185,9 +185,14 @@ export default function WatchlistModal({
 
                     {/* Price & Countdown */}
                     <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
-                      {item.price !== undefined && item.price > 0 && (
+                      {/* Older items stored 0 for "no price"; never show it as a figure. */}
+                      {item.price != null && item.price > 0 ? (
                         <div className="font-bold text-emerald-700 text-xs sm:text-sm bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-md">
                           {item.country === "UK" ? "£" : "$"}{item.price.toLocaleString()}
+                        </div>
+                      ) : (
+                        <div className="font-bold text-slate-500 text-xs sm:text-sm bg-slate-50 border border-slate-200/60 px-2 py-0.5 rounded-md" title="No bid known when this lot was saved">
+                          –
                         </div>
                       )}
                       <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${

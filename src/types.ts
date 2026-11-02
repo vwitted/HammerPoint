@@ -58,7 +58,7 @@ export interface WatchlistItem {
   title: string;
   auctioneer: string;
   location: string;
-  price?: number;
+  price?: number | null;
   endingDate: string;
   url: string;
   category: string;

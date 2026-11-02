@@ -323,7 +323,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       title: listing.title,
       auctioneer: listing.auctioneer,
       location: listing.address,
-      price: listing.currentPrice || listing.startPrice || 0,
+      price: listing.currentPrice || listing.startPrice || null, // null = no bid known; never 0
       endingDate: listing.endingDate,
       url: listing.url,
       category: listing.category,

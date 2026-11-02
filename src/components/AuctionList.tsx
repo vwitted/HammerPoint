@@ -227,8 +227,15 @@ export default function AuctionList({
                       );
                     }
 
-                    // No bid known: the estimate badge above says enough, if there is one.
-                    if (!isLotUnpriced(item)) return null;
+                    // No bid known (e.g. the site didn't give one): show a dash, never a guess.
+                    if (!isLotUnpriced(item)) {
+                      return (
+                        <div className="font-sans font-bold text-slate-500 text-xs sm:text-sm bg-slate-50 border border-slate-200/60 px-2 py-0.5 rounded-md flex items-center gap-1 shadow-2xs" title="The auction site didn't give a bid for this lot">
+                          <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Bid:</span>
+                          <span>–</span>
+                        </div>
+                      );
+                    }
 
                     // If neither price nor estimate is present (truly blind autobid only)
                     return (
