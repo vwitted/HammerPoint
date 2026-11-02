@@ -2,6 +2,8 @@ import { getCoordinatesForLocation } from "../lib/geo";
 import { withCancel } from "../lib/cancel";
 import { categorizeByTitle } from "../lib/categories";
 import { cleanHtmlText } from "../lib/text";
+import { parseUkLocalDateTime } from "../lib/dates";
+import { http2Client } from "../lib/http2";
 
 export interface EasyLiveHit {
   auction_type?: string;
@@ -180,109 +182,131 @@ export function normalizeEasyLiveLot(hit: EasyLiveHit, keyword: string = ""): an
 // In-memory cache for Easy Live Auction real-time bidding data (60-second TTL)
 export const easyLiveBidCache = new Map<string, { timestamp: number; data: any }>();
 
-// Enrich Easy Live Auction lots with live starting bid and real-time dates from doRefreshTimedBidding
-export async function enrichEasyLiveTimedBidding(lots: any[], cancelSignal?: AbortSignal): Promise<any[]> {
-  // Target lots that have a valid EasyLive lot URL
-  const targetLots = lots.filter(lot => 
-    lot.url &&
-    lot.url.includes("/lot/")
-  );
+const EASYLIVE_ORIGIN = "https://www.easyliveauction.com";
+const BID_REFRESH_URL = `${EASYLIVE_ORIGIN}/components/catalogue_components.cfc?method=doRefreshTimedBidding`;
+const BID_REFRESH_TIMEOUT_MS = 15000;
 
-  if (targetLots.length === 0) return lots;
+type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal }) => Promise<Response>;
 
-  // Enrich up to 35 lots concurrently
-  const enrichPromises = targetLots.slice(0, 35).map(async (lot) => {
+// Cloudflare's "Just a moment..." page. Easy Live sends it to HTTP/1.1 clients such as Node's
+// fetch, but serves the same request over HTTP/2.
+function isCloudflareChallenge(res: Response): boolean {
+  return res.headers.get("cf-mitigated") === "challenge";
+}
+
+// Asks Easy Live for a lot's bid box. Returns the parsed data, null when there is none (the site
+// answers "{}" for live-sale lots without one), or "blocked" for a Cloudflare challenge.
+async function requestBidInfo(send: FetchLike, lotHash: string, cancelSignal?: AbortSignal): Promise<any | null | "blocked"> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), BID_REFRESH_TIMEOUT_MS);
+  try {
+    const res = await send(BID_REFRESH_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-Requested-With": "XMLHttpRequest",
+        "User-Agent": "Mozilla/5.0",
+      },
+      body: "data=" + encodeURIComponent(JSON.stringify({ lot: lotHash, l: "0" })),
+      signal: withCancel(controller.signal, cancelSignal),
+    });
+    if (isCloudflareChallenge(res)) return "blocked";
+    if (!res.ok) return null;
+    const clean = (await res.text()).replace(/^\/\//, "").trim();
+    if (!clean || clean === "{}") return null;
     try {
-      const match = lot.url.match(/\/lot\/([a-f0-9]{32})/i);
-      if (!match) return;
-      const lotHash = match[1];
-
-      // Check cache (60s TTL)
-      const cached = easyLiveBidCache.get(lotHash);
-      let info: any = null;
-      if (cached && Date.now() - cached.timestamp < 60000) {
-        info = cached.data;
-      } else {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-        const res = await fetch("https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "X-Requested-With": "XMLHttpRequest",
-            "User-Agent": "Mozilla/5.0",
-            "Connection": "close"
-          },
-          body: "data=" + encodeURIComponent(JSON.stringify({ lot: lotHash, l: "0" })),
-          signal: withCancel(controller.signal, cancelSignal)
-        });
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-          const text = await res.text();
-          const clean = text.replace(/^\/\//, "").trim();
-          if (clean && clean !== "{}") {
-            try {
-              info = JSON.parse(clean);
-              easyLiveBidCache.set(lotHash, { timestamp: Date.now(), data: info });
-            } catch {}
-          }
-        }
-      }
-
-      if (!info) return;
-
-      // The lot page shows these two fields verbatim in its bid box, e.g. "Starting Bid:" / "100 GBP"
-      // before anyone bids and "Current Bid:" / "48 GBP" after.
-      if (info.bid != null) {
-        const strBid = String(info.bid);
-        const numMatch = strBid.match(/[\d,.]+/);
-        if (numMatch) {
-          const val = parseFloat(numMatch[0].replace(/,/g, ""));
-          if (!isNaN(val) && val > 0) {
-            const siteLabel = typeof info.bidLabel === "string" ? info.bidLabel.replace(/:\s*$/, "").trim() : "";
-            const isStarting = siteLabel
-              ? siteLabel.toLowerCase().includes("starting")
-              : (info.history === 0 && !info.beenOutbid);
-            if (isStarting) {
-              lot.startPrice = val;
-              lot.currentPrice = val;
-            } else {
-              lot.currentPrice = val;
-            }
-            lot.bidLabel = siteLabel || (isStarting ? "Starting Bid" : "Current Bid");
-          }
-        }
-      }
-
-      if (info.maxNextBid && typeof info.maxNextBid === "string") {
-        lot.minNextBid = info.maxNextBid;
-      }
-
-      if (info.reserve && typeof info.reserve === "string") {
-        lot.reserveStatus = info.reserve;
-        if (info.reserveMet === 1) {
-          lot.reserveMet = true;
-        }
-      }
-
-      // Update dateEnd / startDate if provided with full timestamp (e.g. "September, 09 2026 16:00:00")
-      if (info.dateEnd && typeof info.dateEnd === "string") {
-        const parsed = new Date(info.dateEnd + " GMT");
-        if (!isNaN(parsed.getTime())) {
-          lot.endingDate = parsed.toISOString();
-          if (info.endLabel?.toLowerCase().includes("starts")) {
-            lot.startDate = parsed.toISOString();
-          }
-        }
-      }
+      return JSON.parse(clean);
     } catch {
-      // Ignore network timeout on individual lot enrichment
+      return null;
     }
-  });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
-  await Promise.allSettled(enrichPromises);
+// Copies a lot's bid box data onto the lot.
+function applyBidInfo(lot: any, info: any): void {
+  // The lot page shows these two fields verbatim in its bid box, e.g. "Starting Bid:" / "100 GBP"
+  // before anyone bids and "Current Bid:" / "48 GBP" after.
+  if (info.bid != null) {
+    const numMatch = String(info.bid).match(/[\d,.]+/);
+    if (numMatch) {
+      const val = parseFloat(numMatch[0].replace(/,/g, ""));
+      if (!isNaN(val) && val > 0) {
+        const siteLabel = typeof info.bidLabel === "string" ? info.bidLabel.replace(/:\s*$/, "").trim() : "";
+        const isStarting = siteLabel
+          ? siteLabel.toLowerCase().includes("starting")
+          : (info.history === 0 && !info.beenOutbid);
+        if (isStarting) lot.startPrice = val;
+        lot.currentPrice = val;
+        lot.bidLabel = siteLabel || (isStarting ? "Starting Bid" : "Current Bid");
+      }
+    }
+  }
+
+  if (info.maxNextBid && typeof info.maxNextBid === "string") {
+    lot.minNextBid = info.maxNextBid;
+  }
+
+  if (info.reserve && typeof info.reserve === "string") {
+    lot.reserveStatus = info.reserve;
+    if (info.reserveMet === 1) {
+      lot.reserveMet = true;
+    }
+  }
+
+  // Full end (or, for live sales, start) time in UK local time, e.g. "September, 09 2026 16:00:00".
+  if (info.dateEnd && typeof info.dateEnd === "string") {
+    const parsed = parseUkLocalDateTime(info.dateEnd);
+    if (parsed) {
+      lot.endingDate = parsed.toISOString();
+      if (info.endLabel?.toLowerCase().includes("starts")) {
+        lot.startDate = parsed.toISOString();
+      }
+    }
+  }
+}
+
+// Enrich Easy Live Auction lots with the live bid and exact times from each lot's bid box.
+// Tries fetch on one lot first; if Cloudflare challenges it, every lookup goes over HTTP/2
+// instead, on one shared connection, so a blocked search costs one wasted request, not 35.
+export async function enrichEasyLiveTimedBidding(lots: any[], cancelSignal?: AbortSignal): Promise<any[]> {
+  const lookups: { lot: any; lotHash: string }[] = [];
+  for (const lot of lots) {
+    if (lookups.length >= 35) break;
+    const match = typeof lot.url === "string" ? lot.url.match(/\/lot\/([a-f0-9]{32})/i) : null;
+    if (!match) continue;
+    const cached = easyLiveBidCache.get(match[1]);
+    if (cached && Date.now() - cached.timestamp < 60000) applyBidInfo(lot, cached.data);
+    else lookups.push({ lot, lotHash: match[1] });
+  }
+  if (lookups.length === 0) return lots;
+
+  const lookUp = async (send: FetchLike, { lot, lotHash }: { lot: any; lotHash: string }) => {
+    const info = await requestBidInfo(send, lotHash, cancelSignal);
+    if (info === "blocked") return "blocked";
+    if (info) {
+      easyLiveBidCache.set(lotHash, { timestamp: Date.now(), data: info });
+      applyBidInfo(lot, info);
+    }
+    return "done";
+  };
+  // A failed lookup leaves that lot without a bid; it never fails the search.
+  const settle = (p: Promise<unknown>) => p.catch(() => "failed");
+
+  const [first, ...rest] = lookups;
+  if (await settle(lookUp(fetch, first)) !== "blocked") {
+    await Promise.all(rest.map((l) => settle(lookUp(fetch, l))));
+    return lots;
+  }
+
+  if (cancelSignal?.aborted) return lots;
+  const session = http2Client.openSession(EASYLIVE_ORIGIN, { connectTimeoutMs: 10000, signal: cancelSignal });
+  try {
+    await Promise.all(lookups.map((l) => settle(lookUp(session.fetch, l))));
+  } finally {
+    session.close();
+  }
   return lots;
 }
 

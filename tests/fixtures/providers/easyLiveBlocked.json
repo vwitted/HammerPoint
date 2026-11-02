@@ -1,0 +1,68 @@
+{
+ "note": "Easy Live Algolia query 'lawn mower' where Cloudflare challenges the HTTP/1.1 bid lookup (403, cf-mitigated: challenge) and the HTTP/2 lookups succeed. Trimmed to 5 hits.",
+ "recordedAt": "2026-11-02T00:37:29Z",
+ "requests": [
+  {
+   "key": "POST https://kbisty43u6-dsn.algolia.net/1/indexes/*/queries {\"requests\":[{\"indexName\":\"Upcoming_Auctions\",\"query\":\"lawn mower\",\"params\":\"hitsPerPage=35&page=0&facetFilters=[\\\"sold:X\\\"]\"}]}",
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "body": "{\"results\": [{\"hits\": [{\"auction_type\": \"Live\", \"currency_symbol\": \"£\", \"ukEndDate\": false, \"low_est\": 0, \"end_date\": \"02 Nov\", \"start_date\": \"02 Nov\", \"high_est\": 0, \"imgPath\": \"1FE04BC94CAF435BE90497FAB1E55259_ric01/1101396085\", \"ukStartDate\": false, \"description\": \" A GARDENLINE GLM43H ELECTRIC LAWN MOWER with grassbox and a Bosch Easi Hedge cut 45 hedge trimmer with original box (both PAT pass and working)    Qty: (2)\", \"lot_url\": \"e57036d99dc83852e8456b877b60be85/0af8d24542e81eb9357e7ef448a6646f/antique-home-sale-lot-62/\", \"objectID\": \"ric01_1140173999\"}, {\"auction_type\": \"Timed\", \"currency_symbol\": \"£\", \"ukEndDate\": false, \"low_est\": 12, \"end_date\": \"04 Nov\", \"start_date\": \"29 Oct\", \"high_est\": 20, \"imgPath\": \"9A821BE47FF52E3FE179B1669BE89738_mst01/1100493411\", \"ukStartDate\": false, \"description\": \"1 x Honda petrol engine lawn mower \", \"lot_url\": \"9b4a11f919151f218a37e16b1903b93f/0af8d24542e81eb9357e7ef448a6646f/timed-online-auction-of-plant-machinery-engineering-lot-9009/\", \"objectID\": \"mst01_1140216131\"}, {\"auction_type\": \"Timed\", \"currency_symbol\": \"£\", \"ukEndDate\": false, \"low_est\": 60, \"end_date\": \"04 Nov\", \"start_date\": \"29 Oct\", \"high_est\": 80, \"imgPath\": \"9A821BE47FF52E3FE179B1669BE89738_mst01/1100492789\", \"ukStartDate\": false, \"description\": \"1 x Cobra self propelled petrol engine lawn mower\", \"lot_url\": \"de700d35d875a4d6a52b0dcfce4ef968/0af8d24542e81eb9357e7ef448a6646f/timed-online-auction-of-plant-machinery-engineering-lot-8608/\", \"objectID\": \"mst01_1140215596\"}, {\"auction_type\": \"Live\", \"currency_symbol\": \"£\", \"ukEndDate\": false, \"low_est\": 15.0, \"end_date\": \"04 Nov\", \"start_date\": \"04 Nov\", \"high_est\": 30.0, \"imgPath\": \"E48C026E2E4DEF6914FFC50E27ED6549_bol03/1100037077\", \"ukStartDate\": false, \"description\": \"A Bosch electric lawn mower\", \"lot_url\": \"ed2dd74b4807d17fbb7cf7a65687635f/0af8d24542e81eb9357e7ef448a6646f/antique-interiors-and-general-sale-lot-2/\", \"objectID\": \"bol03_1140237310\"}, {\"auction_type\": \"Live\", \"currency_symbol\": \"£\", \"ukEndDate\": false, \"low_est\": 40, \"end_date\": \"04 Nov\", \"start_date\": \"04 Nov\", \"high_est\": 60, \"imgPath\": \"521AEB2FDCA3D63266261E34900C7031_min01/1101345462\", \"ukStartDate\": false, \"description\": \"An Einhell petrol Lawn Mower, a Bosch electric Lawn Mower and a McCulloch 1600w Garden Vac\", \"lot_url\": \"ca9660d22e5bb2d3b6a798097ca8f297/0af8d24542e81eb9357e7ef448a6646f/auction-of-antique-silver-coins-banknotes-ceramics-lot-252/\", \"objectID\": \"min01_1140250590\"}]}]}"
+  },
+  {
+   "key": "POST https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding data=%7B%22lot%22%3A%22e57036d99dc83852e8456b877b60be85%22%2C%22l%22%3A%220%22%7D",
+   "status": 403,
+   "headers": {
+    "content-type": "text/html; charset=UTF-8",
+    "cf-mitigated": "challenge"
+   },
+   "body": "<!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title></head><body>[trimmed Cloudflare challenge page]</body></html>"
+  },
+  {
+   "transport": "http2",
+   "key": "POST https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding data=%7B%22lot%22%3A%22e57036d99dc83852e8456b877b60be85%22%2C%22l%22%3A%220%22%7D",
+   "status": 200,
+   "headers": {
+    "content-type": "text/html;charset=UTF-8"
+   },
+   "body": "//{}"
+  },
+  {
+   "transport": "http2",
+   "key": "POST https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding data=%7B%22lot%22%3A%22ca9660d22e5bb2d3b6a798097ca8f297%22%2C%22l%22%3A%220%22%7D",
+   "status": 200,
+   "headers": {
+    "content-type": "text/html;charset=UTF-8"
+   },
+   "body": "//{}"
+  },
+  {
+   "transport": "http2",
+   "key": "POST https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding data=%7B%22lot%22%3A%22ed2dd74b4807d17fbb7cf7a65687635f%22%2C%22l%22%3A%220%22%7D",
+   "status": 200,
+   "headers": {
+    "content-type": "text/html;charset=UTF-8"
+   },
+   "body": "//{\"maxNextBid\":\"Min: 10 GBP\",\"endTime\":\"4 Nov from 10:00 GMT   \",\"beenOutbid\":0,\"theLeader\":0,\"ended\":0,\"userCurrentBid\":0,\"bidStatusText\":\"\",\"bidStatus\":0,\"lotQuantity\":\"1\",\"syncBid\":\"1\",\"closeToFinish\":0,\"reserveMet\":1,\"reserve\":\"No Reserve\",\"endLabel\":\"Auction Starts:\",\"watching\":1,\"secondsLeft\":500,\"maxBid\":\"None\",\"bid\":\"10 GBP\",\"bidLabel\":\"Starting Bid:\",\"bidStatusTextColor\":\"\",\"dateEnd\":\"November, 04 2026 10:00:00\",\"history\":0}"
+  },
+  {
+   "transport": "http2",
+   "key": "POST https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding data=%7B%22lot%22%3A%229b4a11f919151f218a37e16b1903b93f%22%2C%22l%22%3A%220%22%7D",
+   "status": 200,
+   "headers": {
+    "content-type": "text/html;charset=UTF-8"
+   },
+   "body": "//{\"maxNextBid\":\"Min: 8 GBP\",\"endTime\":\"4 Nov from 18:36 GMT   \",\"beenOutbid\":0,\"theLeader\":0,\"ended\":0,\"userCurrentBid\":0,\"bidStatusText\":\"\",\"bidStatus\":0,\"lotQuantity\":\"1\",\"syncBid\":\"1\",\"closeToFinish\":0,\"reserveMet\":1,\"reserve\":\"No Reserve\",\"endLabel\":\"Ends:\",\"watching\":3,\"secondsLeft\":\"237530\",\"maxBid\":\"None\",\"bid\":\"7 GBP\",\"bidLabel\":\"Current Bid:\",\"bidStatusTextColor\":\"\",\"dateEnd\":\"November, 04 2026 18:36:20\",\"history\":1}"
+  },
+  {
+   "transport": "http2",
+   "key": "POST https://www.easyliveauction.com/components/catalogue_components.cfc?method=doRefreshTimedBidding data=%7B%22lot%22%3A%22de700d35d875a4d6a52b0dcfce4ef968%22%2C%22l%22%3A%220%22%7D",
+   "status": 200,
+   "headers": {
+    "content-type": "text/html;charset=UTF-8"
+   },
+   "body": "//{\"maxNextBid\":\"Min: 40 GBP\",\"endTime\":\"4 Nov from 16:23 GMT   \",\"beenOutbid\":0,\"theLeader\":0,\"ended\":0,\"userCurrentBid\":0,\"bidStatusText\":\"\",\"bidStatus\":0,\"lotQuantity\":\"1\",\"syncBid\":\"1\",\"closeToFinish\":0,\"reserveMet\":1,\"reserve\":\"No Reserve\",\"endLabel\":\"Ends:\",\"watching\":1,\"secondsLeft\":\"229530\",\"maxBid\":\"None\",\"bid\":\"40 GBP\",\"bidLabel\":\"Starting Bid:\",\"bidStatusTextColor\":\"\",\"dateEnd\":\"November, 04 2026 16:23:00\",\"history\":0}"
+  }
+ ]
+}

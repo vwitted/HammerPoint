@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { cleanHtmlText } from "../server/lib/text.ts";
 import { getCoordinatesForLocation } from "../server/lib/geo.ts";
 import { categorizeByTitle, extractCategoryName, inferCategoryFromTitle } from "../server/lib/categories.ts";
+import { parseUkLocalDateTime } from "../server/lib/dates.ts";
 
 describe("cleanHtmlText", () => {
   it("strips tags, decodes common entities and collapses whitespace", () => {
@@ -96,5 +97,27 @@ describe("extractCategoryName", () => {
   it("guesses from the title when there is no category", () => {
     assert.equal(extractCategoryName(null, "Bench grinder and welder"), "Machinery");
     assert.equal(extractCategoryName(undefined, "Box of odds"), "General");
+  });
+});
+
+describe("parseUkLocalDateTime", () => {
+  it("reads summer times as BST (Easy Live: \"17 Sep from 09:30 BST\")", () => {
+    assert.equal(parseUkLocalDateTime("September, 17 2026 09:30:00")?.toISOString(), "2026-09-17T08:30:00.000Z");
+  });
+
+  it("reads winter times as GMT (Easy Live lot 9009: \"4 Nov from 18:36 GMT\")", () => {
+    assert.equal(parseUkLocalDateTime("November, 04 2026 18:36:20")?.toISOString(), "2026-11-04T18:36:20.000Z");
+  });
+
+  it("handles the days either side of the clock changes", () => {
+    // Clocks go back at 02:00 BST on 25 Oct 2026 and forward at 01:00 GMT on 29 Mar 2026.
+    assert.equal(parseUkLocalDateTime("October, 24 2026 12:00:00")?.toISOString(), "2026-10-24T11:00:00.000Z");
+    assert.equal(parseUkLocalDateTime("October, 26 2026 12:00:00")?.toISOString(), "2026-10-26T12:00:00.000Z");
+    assert.equal(parseUkLocalDateTime("March, 30 2026 12:00:00")?.toISOString(), "2026-03-30T11:00:00.000Z");
+  });
+
+  it("returns null for text that isn't a date", () => {
+    assert.equal(parseUkLocalDateTime("TBC"), null);
+    assert.equal(parseUkLocalDateTime(""), null);
   });
 });

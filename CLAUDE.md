@@ -22,7 +22,7 @@ Before finishing any change: `npm run lint && npm test`. If you touched `firesto
 - `server/app.ts`: `createApp()`, middleware and rate limits
 - `server/routes/`: `auctions.ts` (starter lots, SSE search stream), `imageProxy.ts`
 - `server/providers/`: one file per auction source
-- `server/lib/`: shared helpers (`categories`, `geo`, `prices`, `text`, `cancel`)
+- `server/lib/`: shared helpers (`categories`, `geo`, `prices`, `text`, `cancel`, `dates`, `http2`)
 - `server/searchCache.ts`: per-query result cache; `server/safeFetch.ts`: SSRF-safe fetch
 - `src/`: React app; pure display logic lives in `src/utils/` so it can be tested
 - `tests/fixtures/providers/`: real responses recorded from each site
@@ -43,6 +43,8 @@ Scrapers
   `withCancel`, skip Chrome fallbacks once aborted, and close browsers with `closeBrowserOnCancel`.
 - Every network call needs a timeout. Providers return `[]` on failure rather than throwing.
 - Don't add a provider-level cache; results are cached in `SearchCache` in the routes.
+- Easy Live's bid endpoint answers HTTP/1.1 (Node's `fetch`) with a Cloudflare challenge but serves
+  HTTP/2, so bid lookups fall back to `lib/http2.ts` when they see `cf-mitigated: challenge`.
 - Classification and location matching use whole words (see `lib/categories.ts`, `lib/geo.ts`),
   never `includes()` on substrings.
 

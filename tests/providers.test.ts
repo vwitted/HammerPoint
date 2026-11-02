@@ -7,7 +7,7 @@
 //   If a change is intended, review the diff and run `npm run test:update-snapshots`.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { FIXTURE_NOW, loadFixture, startReplay } from "./helpers/replay.ts";
+import { FIXTURE_NOW, HTTP2_PREFIX, loadFixture, startReplay } from "./helpers/replay.ts";
 import { assertMatchesSnapshot } from "./helpers/snapshot.ts";
 import { fetchLiveAuctioneersLots } from "../server/providers/liveAuctioneers.ts";
 import { scrapeTheSaleroomLots } from "../server/providers/theSaleroom.ts";
@@ -102,6 +102,41 @@ describe("Easy Live Auction", () => {
     assert.equal(noBidBox.bidLabel, undefined);
   });
 
+  it("looks bids up over HTTP/2 when Cloudflare challenges the HTTP/1.1 request", async () => {
+    const { lots, unmatched, attempted } = await runWithFixture("easyLiveBlocked", () => fetchEasyLiveAuctionLots("lawn mower", 35, 0));
+    assert.deepEqual(unmatched, []);
+    assertValidListings(lots, 5);
+    // One fetch probe is challenged; then every lot (the probed one included) goes over HTTP/2.
+    const fetchLookups = attempted.filter((k) => !k.startsWith(HTTP2_PREFIX) && k.includes("doRefreshTimedBidding"));
+    const http2Lookups = attempted.filter((k) => k.startsWith(HTTP2_PREFIX));
+    assert.equal(fetchLookups.length, 1);
+    assert.equal(http2Lookups.length, 5);
+
+    const byId = (id: string) => lots.find((l) => l.id === `easylive-${id}`)!;
+    // Lot 9009, 1 x Honda petrol engine lawn mower: est £12 - £20, bid box "Current Bid: 7 GBP",
+    // ends 4 Nov 18:36:20 GMT.
+    const lawnmower = byId("mst01_1140216131");
+    assert.equal(lawnmower.estimateStr, "£12 - £20");
+    assert.equal(lawnmower.currentPrice, 7);
+    assert.equal(lawnmower.startPrice, null);
+    assert.equal(lawnmower.bidLabel, "Current Bid");
+    assert.equal(lawnmower.endingDate, "2026-11-04T18:36:20.000Z");
+
+    // Starting bid below the low estimate: est £15 - £30, "Starting Bid: 10 GBP".
+    const belowEstimate = byId("bol03_1140237310");
+    assert.equal(belowEstimate.estimateStr, "£15 - £30");
+    assert.equal(belowEstimate.startPrice, 10);
+    assert.equal(belowEstimate.bidLabel, "Starting Bid");
+
+    // Live-sale lot whose bid box is empty ({}): estimate only, no price.
+    const noBidBox = byId("min01_1140250590");
+    assert.equal(noBidBox.estimateStr, "£40 - £60");
+    assert.equal(noBidBox.currentPrice, null);
+    assert.equal(noBidBox.bidLabel, undefined);
+
+    assertMatchesSnapshot("easyLiveBlocked", lots);
+  });
+
   it("returns no lots rather than throwing when the search API is unreachable", async () => {
     const { lots } = await runWithFixture("liveAuctioneers", () => fetchEasyLiveAuctionLots("lathe", 35, 0));
     assert.deepEqual(lots, []);
@@ -163,6 +198,7 @@ describe("cancellation", () => {
     ["LiveAuctioneers", "liveAuctioneers", (signal) => fetchLiveAuctioneersLots("lathe", signal)],
     ["The Saleroom", "theSaleroom", (signal) => scrapeTheSaleroomLots("lathe", signal)],
     ["Easy Live", "easyLive", (signal) => fetchEasyLiveAuctionLots("lathe", 35, 0, signal)],
+    ["Easy Live (HTTP/2 fallback)", "easyLiveBlocked", (signal) => fetchEasyLiveAuctionLots("lawn mower", 35, 0, signal)],
     ["BPI", "bpi", (signal) => scrapeBpiLots("", 2, signal)],
     ["HiBid", "hibid", (signal) => scrapeHibidLots("lathe", "", signal)],
     ["SVD", "svd", (signal) => scrapeSvdUpcomingAuctions("", signal)],
