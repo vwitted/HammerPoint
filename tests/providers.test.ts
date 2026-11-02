@@ -66,6 +66,20 @@ describe("The Saleroom", () => {
     assert.ok(lots.every((l) => l.sourcePlatform === "The Saleroom"));
     assertMatchesSnapshot("theSaleroom", lots);
   });
+
+  it("never uses the low estimate as a price", async () => {
+    const { lots } = await runWithFixture("theSaleroom", () => scrapeTheSaleroomLots("lathe"));
+    const byId = (id: string) => lots.find((l) => l.id === `saleroom-${id}`)!;
+    // No bids and no next bid published: estimate only.
+    const noBid = byId("aa5d3485-0650-493b-aff2-b4c2010f6c09");
+    assert.equal(noBid.estimateStr, "£300 - £500");
+    assert.equal(noBid.startPrice, null);
+    assert.equal(noBid.currentPrice, null);
+    // Opening bids really are often below the low estimate: est £25 - £50, next bid £15.
+    const belowEstimate = byId("ff29adf4-c3e9-47ec-b24c-b4c2011352a3");
+    assert.equal(belowEstimate.estimateStr, "£25 - £50");
+    assert.equal(belowEstimate.startPrice, 15);
+  });
 });
 
 describe("Easy Live Auction", () => {

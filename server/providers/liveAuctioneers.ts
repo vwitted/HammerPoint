@@ -63,7 +63,8 @@ export async function fetchLiveAuctioneersLots(keyword: string, cancelSignal?: A
       const sym = item.currency === "GBP" ? "£" : (item.currency === "EUR" ? "€" : "$");
       const estimateStr = (lowEst && highEst) ? `${sym}${lowEst} - ${sym}${highEst}` : (lowEst ? `${sym}${lowEst}` : undefined);
 
-      const effectiveStart = startPrice != null ? startPrice : (lowEst != null ? lowEst : null);
+      // The low estimate is not a bid; with no published start price the price is unknown.
+      const effectiveStart = startPrice;
       const currentPrice = leadingBid != null ? leadingBid : effectiveStart;
 
       const endingDate = (typeof item.lotEndTimeEstimatedTs === "number" && item.lotEndTimeEstimatedTs > 0)

@@ -53,7 +53,8 @@ export async function scrapeTheSaleroomLots(keyword: string, cancelSignal?: Abor
     if (hits.length > 0) {
       return hits.map((h: any, i: number) => {
         const sym = h.currency === 'USD' ? '$' : (h.currency === 'EUR' ? '€' : '£');
-        const startPrice = (h.nextBid && h.nextBid > 0) ? h.nextBid : (h.lowEstimate && h.lowEstimate > 0 ? h.lowEstimate : null);
+        // The low estimate is not a bid; with no next bid published the price is unknown.
+        const startPrice = (h.nextBid && h.nextBid > 0) ? h.nextBid : null;
         const currentPrice = (h.lastBid && h.lastBid > 0) ? h.lastBid : startPrice;
         let estimateStr: string | undefined = undefined;
         if (h.lowEstimate && h.highEstimate) {
