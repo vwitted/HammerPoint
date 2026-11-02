@@ -59,12 +59,15 @@ export function noteFailure(err: unknown, step: string, cancelSignal?: AbortSign
   if (e?.name === "AbortError" || e?.name === "TimeoutError" || /timed? ?out|timeout/i.test(message)) {
     reportSourceIssue("timeout", step, "timed out");
   } else {
-    reportSourceIssue("failed", step, message.slice(0, 120));
+    // First line only, whitespace collapsed: some errors (e.g. Chrome failing to launch) run to
+    // many lines, and this goes into one-line logs and status text.
+    reportSourceIssue("failed", step, message.split("\n")[0].replace(/\s+/g, " ").trim().slice(0, 120));
   }
 }
 
 // Page titles of the bot-check pages Chrome lands on instead of the real page.
-const CHALLENGE_TITLE = /just a moment|attention required|access denied|verify(ing)? you are human|security check|pardon our interruption/i;
+// ("Human Verification" is AWS WAF's CAPTCHA page, seen on BidSpotter.)
+const CHALLENGE_TITLE = /just a moment|attention required|access denied|human verification|verify(ing)? you are human|security check|pardon our interruption/i;
 
 // Notes a Chrome page that is a bot check rather than the site. Returns true if it is.
 export async function noteChallengePage(page: { title(): Promise<string> }, step: string): Promise<boolean> {

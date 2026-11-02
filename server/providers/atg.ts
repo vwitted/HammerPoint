@@ -177,13 +177,12 @@ export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, i
   const scrapeTask = (async () => {
     try {
       browser = await puppeteer.launch({
+        // No --single-process: current Chrome crashes on launch with it ("Target closed").
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
-          '--single-process',
-          '--disable-gpu',
-          '--no-zygote'
+          '--disable-gpu'
         ],
         headless: true
       });

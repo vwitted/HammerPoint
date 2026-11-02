@@ -47,8 +47,10 @@ describe("sourceHealth", () => {
     const { result, issues } = await collectSourceIssues(async () => [
       await noteChallengePage({ title: async () => "Just a moment..." }, "search page (Chrome)"),
       await noteChallengePage({ title: async () => "Search results | BidSpotter" }, "search page (Chrome)"),
+      // AWS WAF CAPTCHA, as BidSpotter served it on 2 Nov 2026.
+      await noteChallengePage({ title: async () => "Human Verification" }, "search page (Chrome)"),
     ]);
-    assert.deepEqual(result, [true, false]);
+    assert.deepEqual(result, [true, false, true]);
     assert.equal(describeIssue(issues[0]), 'search page (Chrome) blocked (bot check page ("Just a moment..."))');
   });
 
@@ -113,5 +115,14 @@ describe("problems reported by providers", () => {
     const { result, issues } = await runCollecting([], () => scrapeTheSaleroomLots("lathe"));
     assert.deepEqual(result, []);
     assert.deepEqual(issues.map((i) => [i.kind, i.step]), [["failed", "search page (Chrome)"], ["failed", "search"]]);
+  });
+});
+
+describe("sourceHealth: error text", () => {
+  it("keeps only the first line of multi-line errors", async () => {
+    const { issues } = await collectSourceIssues(async () => {
+      noteFailure(new Error("Failed to launch the browser process:  Code: 127\n\nstderr:\nsh: not found"), "search page (Chrome)");
+    });
+    assert.equal(issues[0].detail, "Failed to launch the browser process: Code: 127");
   });
 });
