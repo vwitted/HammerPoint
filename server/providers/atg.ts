@@ -1,6 +1,7 @@
 import puppeteer from "puppeteer";
 import { categorizeByTitle } from "../lib/categories";
 import { getCoordinatesForLocation } from "../lib/geo";
+import { noteChallengePage, noteFailure, reportSourceIssue } from "../lib/sourceHealth";
 
 // Dedicated BidSpotter UK scraper via Puppeteer
 export async function scrapeBidspotterLots(keyword: string, cancelSignal?: AbortSignal): Promise<any[]> {
@@ -164,6 +165,7 @@ export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, i
       if (stopped) return;
       stopped = true;
       console.warn(`[${siteName}] Scraper stopped: ${reason}`);
+      if (reason !== "cancelled") reportSourceIssue("timeout", "search page (Chrome)", "timed out");
       if (browser) browser.close().catch(() => {});
       resolve([]);
     };
@@ -207,6 +209,8 @@ export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, i
       } catch {
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 6000 }).catch(() => {});
       }
+      if (stopped) return [];
+      if (await noteChallengePage(page, "search page (Chrome)")) return [];
 
       // Retry evaluate in case AWS WAF challenge completes a post-navigation step
       let rawLots: any[] = [];
@@ -235,6 +239,7 @@ export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, i
       return (rawLots || []).map((item: any, i: number) => mapAtgRawLot(item, i, siteName, idPrefix));
     } catch (err: any) {
       console.warn(`[${siteName}] Scraper warning:`, err.message);
+      if (!stopped) noteFailure(err, "search page (Chrome)", cancelSignal);
       return [];
     } finally {
       if (browser) {

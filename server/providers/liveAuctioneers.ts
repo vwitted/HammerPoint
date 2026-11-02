@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { withCancel } from "../lib/cancel";
+import { noteFailure, noteResponse } from "../lib/sourceHealth";
 import { categorizeByTitle } from "../lib/categories";
 import { getCoordinatesForLocation } from "../lib/geo";
 
@@ -34,6 +35,7 @@ export async function fetchLiveAuctioneersLots(keyword: string, cancelSignal?: A
 
     if (!res.ok) {
       console.warn(`LiveAuctioneers search returned status: ${res.status}`);
+      noteResponse(res, "search");
       return [];
     }
 
@@ -103,6 +105,7 @@ export async function fetchLiveAuctioneersLots(keyword: string, cancelSignal?: A
     });
   } catch (err: any) {
     console.warn("Error in LiveAuctioneers fetch:", err.message);
+    noteFailure(err, "search", cancelSignal);
     return [];
   }
 }

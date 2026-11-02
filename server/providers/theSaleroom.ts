@@ -1,5 +1,6 @@
 import { scrapeAtgPlatformLots } from "./atg";
 import { withCancel } from "../lib/cancel";
+import { noteFailure, noteResponse } from "../lib/sourceHealth";
 
 // High-performance search for The Saleroom via Algolia InstantSearch API with Puppeteer fallback
 export async function scrapeTheSaleroomLots(keyword: string, cancelSignal?: AbortSignal): Promise<any[]> {
@@ -7,6 +8,8 @@ export async function scrapeTheSaleroomLots(keyword: string, cancelSignal?: Abor
   const apiKey = 'b1f48e75f522cc67ff7751f1abd75458';
   const url = `https://${appId}-dsn.algolia.net/1/indexes/lots_sr_en/query`;
   const now = Date.now();
+  // Reported only if the Chrome fallback also comes back empty.
+  let algoliaProblem: (() => void) | null = null;
 
   const doAlgoliaQuery = async (numericFilters?: string[]) => {
     const body: any = {
@@ -35,7 +38,10 @@ export async function scrapeTheSaleroomLots(keyword: string, cancelSignal?: Abor
       signal: withCancel(controller.signal, cancelSignal)
     });
     clearTimeout(timeoutId);
-    if (!res.ok) throw new Error(`Algolia query status: ${res.status}`);
+    if (!res.ok) {
+      algoliaProblem = () => noteResponse(res, "search");
+      throw new Error(`Algolia query status: ${res.status}`);
+    }
     return await res.json();
   };
 
@@ -91,8 +97,11 @@ export async function scrapeTheSaleroomLots(keyword: string, cancelSignal?: Abor
     }
   } catch (err: any) {
     console.warn('[The Saleroom] Algolia failed, falling back to Puppeteer:', err.message);
+    algoliaProblem ??= () => noteFailure(err, "search", cancelSignal);
   }
 
   // Fallback to Puppeteer for The Saleroom if Algolia query yields 0 or fails
-  return await scrapeAtgPlatformLots('https://www.the-saleroom.com', 'The Saleroom', 'saleroom', keyword, cancelSignal);
+  const lots = await scrapeAtgPlatformLots('https://www.the-saleroom.com', 'The Saleroom', 'saleroom', keyword, cancelSignal);
+  if (lots.length === 0) algoliaProblem?.();
+  return lots;
 }

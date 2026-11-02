@@ -4,6 +4,7 @@ import { categorizeByTitle } from "../lib/categories";
 import { cleanHtmlText } from "../lib/text";
 import { parseUkLocalDateTime } from "../lib/dates";
 import { http2Client } from "../lib/http2";
+import { noteFailure, noteResponse, reportSourceIssue } from "../lib/sourceHealth";
 
 export interface EasyLiveHit {
   auction_type?: string;
@@ -211,7 +212,10 @@ async function requestBidInfo(send: FetchLike, lotHash: string, cancelSignal?: A
       signal: withCancel(controller.signal, cancelSignal),
     });
     if (isCloudflareChallenge(res)) return "blocked";
-    if (!res.ok) return null;
+    if (!res.ok) {
+      noteResponse(res, "bid lookups");
+      return null;
+    }
     const clean = (await res.text()).replace(/^\/\//, "").trim();
     if (!clean || clean === "{}") return null;
     try {
@@ -282,9 +286,13 @@ export async function enrichEasyLiveTimedBidding(lots: any[], cancelSignal?: Abo
   }
   if (lookups.length === 0) return lots;
 
-  const lookUp = async (send: FetchLike, { lot, lotHash }: { lot: any; lotHash: string }) => {
+  const lookUp = async (send: FetchLike, { lot, lotHash }: { lot: any; lotHash: string }, overHttp2 = false) => {
     const info = await requestBidInfo(send, lotHash, cancelSignal);
-    if (info === "blocked") return "blocked";
+    if (info === "blocked") {
+      // Expected over HTTP/1.1 (that's what triggers the HTTP/2 fallback); a problem over HTTP/2.
+      if (overHttp2) reportSourceIssue("blocked", "bid lookups", "Cloudflare challenge");
+      return "blocked";
+    }
     if (info) {
       easyLiveBidCache.set(lotHash, { timestamp: Date.now(), data: info });
       applyBidInfo(lot, info);
@@ -292,7 +300,10 @@ export async function enrichEasyLiveTimedBidding(lots: any[], cancelSignal?: Abo
     return "done";
   };
   // A failed lookup leaves that lot without a bid; it never fails the search.
-  const settle = (p: Promise<unknown>) => p.catch(() => "failed");
+  const settle = (p: Promise<unknown>) => p.catch((err) => {
+    noteFailure(err, "bid lookups", cancelSignal);
+    return "failed";
+  });
 
   const [first, ...rest] = lookups;
   if (await settle(lookUp(fetch, first)) !== "blocked") {
@@ -301,9 +312,10 @@ export async function enrichEasyLiveTimedBidding(lots: any[], cancelSignal?: Abo
   }
 
   if (cancelSignal?.aborted) return lots;
+  console.log(`[Easy Live] Bid lookup challenged over HTTP/1.1; looking up ${lookups.length} lots over HTTP/2`);
   const session = http2Client.openSession(EASYLIVE_ORIGIN, { connectTimeoutMs: 10000, signal: cancelSignal });
   try {
-    await Promise.all(lookups.map((l) => settle(lookUp(session.fetch, l))));
+    await Promise.all(lookups.map((l) => settle(lookUp(session.fetch, l, true))));
   } finally {
     session.close();
   }
@@ -343,6 +355,7 @@ export async function fetchEasyLiveAuctionLots(keyword: string, hitsPerPage: num
 
     if (!res.ok) {
       console.warn(`EasyLive Algolia fetch returned status ${res.status}`);
+      noteResponse(res, "search");
       return [];
     }
 
@@ -352,6 +365,7 @@ export async function fetchEasyLiveAuctionLots(keyword: string, hitsPerPage: num
     return await enrichEasyLiveTimedBidding(lots, cancelSignal);
   } catch (err: any) {
     console.error("Easy Live Auction fetch error:", err.message);
+    noteFailure(err, "search", cancelSignal);
     return [];
   }
 }

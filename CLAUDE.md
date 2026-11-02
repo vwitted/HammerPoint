@@ -22,7 +22,8 @@ Before finishing any change: `npm run lint && npm test`. If you touched `firesto
 - `server/app.ts`: `createApp()`, middleware and rate limits
 - `server/routes/`: `auctions.ts` (starter lots, SSE search stream), `imageProxy.ts`
 - `server/providers/`: one file per auction source
-- `server/lib/`: shared helpers (`categories`, `geo`, `prices`, `text`, `cancel`, `dates`, `http2`)
+- `server/lib/`: shared helpers (`categories`, `geo`, `prices`, `text`, `cancel`, `dates`, `http2`,
+  `sourceHealth`)
 - `server/searchCache.ts`: per-query result cache; `server/safeFetch.ts`: SSRF-safe fetch
 - `src/`: React app; pure display logic lives in `src/utils/` so it can be tested
 - `tests/fixtures/providers/`: real responses recorded from each site
@@ -42,6 +43,9 @@ Scrapers
 - Every provider takes an optional `cancelSignal` and must honour it: pass it to every `fetch` via
   `withCancel`, skip Chrome fallbacks once aborted, and close browsers with `closeBrowserOnCancel`.
 - Every network call needs a timeout. Providers return `[]` on failure rather than throwing.
+- When a call is blocked, times out or fails, also note it with `lib/sourceHealth.ts` (`noteResponse`,
+  `noteFailure`, `noteChallengePage`) so the search shows why a source came back empty. If a fallback
+  then succeeds, don't report the first attempt.
 - Don't add a provider-level cache; results are cached in `SearchCache` in the routes.
 - Easy Live's bid endpoint answers HTTP/1.1 (Node's `fetch`) with a Cloudflare challenge but serves
   HTTP/2, so bid lookups fall back to `lib/http2.ts` when they see `cf-mitigated: challenge`.

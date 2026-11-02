@@ -1,5 +1,6 @@
 import puppeteer from "puppeteer";
 import { closeBrowserOnCancel, withCancel } from "../lib/cancel";
+import { noteFailure, noteResponse } from "../lib/sourceHealth";
 import { getCoordinatesForLocation } from "../lib/geo";
 import { cleanHtmlText } from "../lib/text";
 import { extractCategoryName } from "../lib/categories";
@@ -45,6 +46,8 @@ export async function fetchArtisioHeadersCompliant(options: ArtisioRequestOption
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
   };
 
+  // Reported only if the Chrome fallback fails too.
+  let directProblem: () => void = () => {};
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
@@ -63,21 +66,25 @@ export async function fetchArtisioHeadersCompliant(options: ArtisioRequestOption
     }
 
     console.warn(`Artisio direct fetch returned status ${res.status}. Attempting Puppeteer fallback.`);
+    directProblem = () => noteResponse(res, "search");
   } catch (fetchErr: any) {
     console.warn(`Artisio direct fetch failed (${fetchErr.message}). Attempting Puppeteer fallback.`);
+    directProblem = () => noteFailure(fetchErr, "search", cancelSignal);
   }
 
   // Fallback: Puppeteer browser fetch if direct fetch is blocked (not if the search was cancelled)
   if (cancelSignal?.aborted) return { lots: { count: 0, results: [] } };
   try {
-    return await fetchArtisioViaPuppeteer(url, clientId, originUrl, refererUrl, cancelSignal);
+    return await fetchArtisioViaPuppeteer(url, clientId, originUrl, refererUrl, cancelSignal, directProblem);
   } catch {
+    directProblem();
     return { lots: { count: 0, results: [] } };
   }
 }
 
 // Puppeteer fallback execution for Artisio requests in environments where Chrome is available
-export async function fetchArtisioViaPuppeteer(targetUrl: string, clientId: string, originUrl: string, refererUrl: string, cancelSignal?: AbortSignal): Promise<any> {
+// onFailure runs if this fallback fails too (to report why the direct request didn't work).
+export async function fetchArtisioViaPuppeteer(targetUrl: string, clientId: string, originUrl: string, refererUrl: string, cancelSignal?: AbortSignal, onFailure: () => void = () => {}): Promise<any> {
   let browser: any = null;
   let stopClosingOnCancel = () => {};
   try {
@@ -121,6 +128,10 @@ export async function fetchArtisioViaPuppeteer(targetUrl: string, clientId: stri
     return result;
   } catch (puppeteerErr: any) {
     console.warn("Puppeteer Artisio fallback notice:", puppeteerErr.message);
+    if (!cancelSignal?.aborted) {
+      onFailure();
+      noteFailure(puppeteerErr, "search (Chrome)", cancelSignal);
+    }
     return { lots: { count: 0, results: [] } };
   } finally {
     stopClosingOnCancel();
@@ -284,6 +295,7 @@ export async function scrapeBpiLots(keyword: string, maxPages: number = 3, cance
     return allLots;
   } catch (e: any) {
     console.error("Error scraping BPI lots via compliant wrapper:", e.message);
+    noteFailure(e, "search", cancelSignal);
     return [];
   }
 }

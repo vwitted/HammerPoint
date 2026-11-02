@@ -10,6 +10,8 @@ import WatchlistModal from "./components/WatchlistModal";
 import SearchAlertsModal from "./components/SearchAlertsModal";
 import AdminPanelModal from "./components/AdminPanelModal";
 import { motion, AnimatePresence } from "motion/react";
+import SourceIssueList, { CHIP_TONE_CLASS } from "./components/SourceIssueList";
+import { sourceChip, type SourceStreamStatus } from "./utils/sourceStatus";
 import { 
   Search, 
   Sparkles, 
@@ -93,7 +95,7 @@ export default function App() {
   } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [streamStatusMap, setStreamStatusMap] = useState<Record<string, { name: string; status: "searching" | "completed" | "error"; count?: number }>>({});
+  const [streamStatusMap, setStreamStatusMap] = useState<Record<string, SourceStreamStatus>>({});
   const eventSourceRef = useRef<EventSource | null>(null);
   const [scrapeStep, setScrapeStep] = useState("");
   const [scrapeError, setScrapeError] = useState<string | null>(null);
@@ -327,7 +329,8 @@ export default function App() {
             [data.provider]: {
               name: data.name,
               status: data.status,
-              count: data.count
+              count: data.count,
+              issues: Array.isArray(data.issues) ? data.issues : []
             }
           }));
 
@@ -862,22 +865,17 @@ export default function App() {
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-1 text-[10px]">
-                  {(Object.entries(streamStatusMap) as [string, { name: string; status: "searching" | "completed" | "error"; count?: number }][]).map(([key, item]) => (
-                    <span
-                      key={key}
-                      className={`px-1.5 py-0.5 rounded font-mono flex items-center gap-1 ${
-                        item.status === "completed"
-                          ? "bg-emerald-950/90 text-emerald-300 border border-emerald-800/80"
-                          : item.status === "searching"
-                            ? "bg-blue-950/90 text-blue-300 border border-blue-800/80 animate-pulse"
-                            : "bg-red-950/90 text-red-300 border border-red-800/80"
-                      }`}
-                    >
-                      <span>{item.status === "completed" ? "✓" : item.status === "searching" ? "⏳" : "✕"}</span>
-                      <span>{item.name}{item.count != null ? ` (${item.count})` : ""}</span>
-                    </span>
-                  ))}
+                  {(Object.entries(streamStatusMap) as [string, SourceStreamStatus][]).map(([key, item]) => {
+                    const chip = sourceChip(item);
+                    return (
+                      <span key={key} className={`px-1.5 py-0.5 rounded font-mono flex items-center gap-1 ${CHIP_TONE_CLASS[chip.tone]}`}>
+                        <span>{chip.icon}</span>
+                        <span>{chip.label}</span>
+                      </span>
+                    );
+                  })}
                 </div>
+                <SourceIssueList sources={streamStatusMap} />
                 <p className="text-[11px] text-slate-300 leading-snug">
                   You can freely browse, filter, or inspect listings right now while background scrapers finish.
                 </p>
@@ -964,6 +962,7 @@ export default function App() {
                   )}
                 </div>
               )}
+              {searchBreakdown && !isStreaming && <SourceIssueList sources={streamStatusMap} />}
             </div>
           )}
 

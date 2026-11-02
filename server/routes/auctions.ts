@@ -1,12 +1,17 @@
 import type { Express, RequestHandler } from "express";
 import { applyPriceFallbacks } from "../lib/prices";
 import { SearchCache } from "../searchCache";
+import { collectSourceIssues, describeIssue, type SourceIssue } from "../lib/sourceHealth";
 import { fetchLiveAuctioneersLots } from "../providers/liveAuctioneers";
 import { fetchEasyLiveAuctionLots } from "../providers/easyLive";
 import { scrapeBpiLots } from "../providers/bpi";
 import { scrapeHibidLotsWithTimeout, scrapeSvdUpcomingAuctions } from "../providers/hibid";
 import { scrapeBidspotterLots } from "../providers/atg";
 import { scrapeTheSaleroomLots } from "../providers/theSaleroom";
+
+// A source's lots, carrying the problems met while fetching them (see lib/sourceHealth.ts), so a
+// cached result reports the same problems as the search that produced it.
+type LotsWithIssues = any[] & { issues?: SourceIssue[] };
 
 // Search results per source + query. Shared by all visitors; see server/searchCache.ts.
 const searchCache = new SearchCache<any>({
@@ -108,14 +113,23 @@ export function registerAuctionRoutes(app: Express, searchLimiter: RequestHandle
       sendEvent("provider_status", { provider: id, name, status: "searching" });
       try {
         const cacheKey = `${id}:${keyword.toLowerCase()}${cacheKeyExtra}`;
-        const lots = await searchCache.get(cacheKey, async (signal) => applyPriceFallbacks(await task(signal)), cancelSignal);
+        let fresh = false;
+        const lots: LotsWithIssues = await searchCache.get(cacheKey, async (signal) => {
+          fresh = true;
+          const { result, issues } = await collectSourceIssues(() => task(signal));
+          return Object.assign(applyPriceFallbacks(result), { issues });
+        }, cancelSignal);
         if (!isConnected) return;
+        const issues = lots.issues ?? [];
+        console.log(`[Search] "${keyword}" ${name}: ${lots.length} lots${fresh ? "" : " (cached)"}` +
+          (issues.length ? `; ${issues.map(describeIssue).join("; ")}` : ""));
         sendEvent("provider_results", {
           provider: id,
           name,
           status: "completed",
           count: lots.length,
-          lots
+          lots,
+          issues: issues.map((issue) => ({ kind: issue.kind, summary: describeIssue(issue) }))
         });
       } catch (err: any) {
         console.error(`Streaming error for ${name}:`, err.message);
