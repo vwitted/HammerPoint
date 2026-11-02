@@ -109,20 +109,11 @@ export function isLotUnpriced(item: AuctionListing): boolean {
   return !hasPrice;
 }
 
-// The price to show on a lot: current bid, else starting price, else the low estimate. Never 0.
+// The bid to show on a lot: the current bid, else the starting price. Never 0, and never the
+// estimate: an estimate is not a bid (opening bids are often well below the low estimate), and it
+// is shown separately. Returns null when the site hasn't told us a bid.
 export function getEffectiveBid(item: AuctionListing): number | null {
-  let lowEstFromStr: number | null = null;
-  if (item.estimateStr) {
-    const match = item.estimateStr.match(/[\d,.]+/);
-    if (match) {
-      const parsed = parseFloat(match[0].replace(/,/g, ""));
-      if (!isNaN(parsed) && parsed > 0) lowEstFromStr = parsed;
-    }
-  }
-
-  return (item.currentPrice != null && item.currentPrice > 0)
-    ? item.currentPrice
-    : (item.startPrice != null && item.startPrice > 0
-        ? item.startPrice
-        : lowEstFromStr);
+  if (item.currentPrice != null && item.currentPrice > 0) return item.currentPrice;
+  if (item.startPrice != null && item.startPrice > 0) return item.startPrice;
+  return null;
 }

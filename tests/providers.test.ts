@@ -77,6 +77,31 @@ describe("Easy Live Auction", () => {
     assertMatchesSnapshot("easyLive", lots);
   });
 
+  it("takes the bid from the lot's bid box and never uses the low estimate as a price", async () => {
+    const { lots } = await runWithFixture("easyLive", () => fetchEasyLiveAuctionLots("lathe", 35, 0));
+    const byId = (id: string) => lots.find((l) => l.id === `easylive-${id}`)!;
+
+    // Estimate £20 - £30, bid box "Starting Bid: 8 GBP".
+    const starting = byId("dav03_1139241479");
+    assert.equal(starting.estimateStr, "£20 - £30");
+    assert.equal(starting.startPrice, 8);
+    assert.equal(starting.currentPrice, 8);
+    assert.equal(starting.bidLabel, "Starting Bid");
+
+    // Bid box "Current Bid: 35 GBP" after 3 bids; the opening bid isn't published.
+    const bidOn = byId("dav03_1139241478");
+    assert.equal(bidOn.currentPrice, 35);
+    assert.equal(bidOn.startPrice, null);
+    assert.equal(bidOn.bidLabel, "Current Bid");
+
+    // Live-sale lots with no bid box data (the site returns {}): estimate £100 - £200, price unknown.
+    const noBidBox = byId("law02_1139264061");
+    assert.equal(noBidBox.estimateStr, "£100 - £200");
+    assert.equal(noBidBox.startPrice, null);
+    assert.equal(noBidBox.currentPrice, null);
+    assert.equal(noBidBox.bidLabel, undefined);
+  });
+
   it("returns no lots rather than throwing when the search API is unreachable", async () => {
     const { lots } = await runWithFixture("liveAuctioneers", () => fetchEasyLiveAuctionLots("lathe", 35, 0));
     assert.deepEqual(lots, []);

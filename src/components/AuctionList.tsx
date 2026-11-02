@@ -227,6 +227,9 @@ export default function AuctionList({
                       );
                     }
 
+                    // No bid known: the estimate badge above says enough, if there is one.
+                    if (!isLotUnpriced(item)) return null;
+
                     // If neither price nor estimate is present (truly blind autobid only)
                     return (
                       <span className="font-sans text-[11px] font-semibold text-slate-500 bg-slate-100 border border-slate-200/80 px-2 py-0.5 rounded-md">

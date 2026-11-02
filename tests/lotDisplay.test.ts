@@ -30,10 +30,14 @@ describe("isLotUnpriced", () => {
 });
 
 describe("getEffectiveBid", () => {
-  it("prefers the current bid, then the starting price, then the low estimate", () => {
+  it("prefers the current bid, then the starting price", () => {
     assert.equal(getEffectiveBid(listing({ currentPrice: 45, startPrice: 20, estimateStr: "£10 - £30" })), 45);
     assert.equal(getEffectiveBid(listing({ currentPrice: null, startPrice: 20, estimateStr: "£10 - £30" })), 20);
-    assert.equal(getEffectiveBid(listing({ estimateStr: "£1,500 - £2,000" })), 1500);
+  });
+
+  it("never presents the low estimate as a bid (Easy Live: estimate £200 - £300, starting bid £100)", () => {
+    assert.equal(getEffectiveBid(listing({ estimateStr: "£1,500 - £2,000" })), null);
+    assert.equal(getEffectiveBid(listing({ startPrice: 100, estimateStr: "£200 - £300" })), 100);
   });
 
   it("never returns 0", () => {

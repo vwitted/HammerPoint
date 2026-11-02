@@ -58,18 +58,15 @@ export function normalizeEasyLiveLot(hit: EasyLiveHit, keyword: string = ""): an
     estimateStr = `£${lowEst}`;
   }
   
-  // Easy Live Pricing Logic:
-  // In UK live webcast & catalogue auctions, online bidding starts at the opening bid.
-  // When a lot has a published estimate (e.g. £3 - £8 for Lot 61 "Honda petrol lawnmower"),
-  // advance pre-bidding begins at the low estimate (£3) if no separate start_price is specified.
-  // If start_price is explicitly given in the hit, use that; otherwise if lowEst > 0, opening bid is lowEst.
-  const rawStartPrice = typeof hit.start_price === "number" && hit.start_price > 0 ? hit.start_price : null;
-  const openingBid = rawStartPrice != null ? rawStartPrice : (lowEst > 0 ? lowEst : null);
-  // If no bids placed yet (or current_bid equals opening bid), current bid price is opening bid (the available entry price)
-  const currentBid = typeof hit.current_bid === "number" && hit.current_bid > 0 ? hit.current_bid : openingBid;
-  const bidLabel = currentBid != null
-    ? (typeof hit.current_bid === "number" && hit.current_bid > 0 && hit.current_bid !== openingBid ? "Current Bid" : "Starting Bid")
-    : undefined;
+  // The search index doesn't carry the opening bid, and it is often well below the low estimate
+  // (e.g. estimate £200 - £300, starting bid £100). The real figure comes from the lot's bid box,
+  // read in enrichEasyLiveTimedBidding. Until then the price is unknown; never use the estimate.
+  const openingBid = typeof hit.start_price === "number" && hit.start_price > 0 ? hit.start_price : null;
+  const latestBid = typeof hit.current_bid === "number" && hit.current_bid > 0 ? hit.current_bid : null;
+  const currentBid = latestBid ?? openingBid;
+  const bidLabel = currentBid == null
+    ? undefined
+    : (latestBid != null && latestBid !== openingBid ? "Current Bid" : "Starting Bid");
   
   // High estimate is strictly an estimate, NOT a reserve price! EasyLive does not reveal reserves.
   const reserve = null;
@@ -236,24 +233,25 @@ export async function enrichEasyLiveTimedBidding(lots: any[], cancelSignal?: Abo
 
       if (!info) return;
 
-      // Parse bid amount if available (e.g. "25 GBP", "Starting bid: 3 GBP")
-      // Parse bid amount if available
+      // The lot page shows these two fields verbatim in its bid box, e.g. "Starting Bid:" / "100 GBP"
+      // before anyone bids and "Current Bid:" / "48 GBP" after.
       if (info.bid != null) {
         const strBid = String(info.bid);
         const numMatch = strBid.match(/[\d,.]+/);
         if (numMatch) {
           const val = parseFloat(numMatch[0].replace(/,/g, ""));
           if (!isNaN(val) && val > 0) {
-            const isStarting = (info.bidLabel || "").toLowerCase().includes("starting") ||
-                               (info.history === 0 && !info.beenOutbid);
+            const siteLabel = typeof info.bidLabel === "string" ? info.bidLabel.replace(/:\s*$/, "").trim() : "";
+            const isStarting = siteLabel
+              ? siteLabel.toLowerCase().includes("starting")
+              : (info.history === 0 && !info.beenOutbid);
             if (isStarting) {
               lot.startPrice = val;
               lot.currentPrice = val;
-              lot.bidLabel = "Starting Bid";
             } else {
               lot.currentPrice = val;
-              lot.bidLabel = "Current Bid";
             }
+            lot.bidLabel = siteLabel || (isStarting ? "Starting Bid" : "Current Bid");
           }
         }
       }
