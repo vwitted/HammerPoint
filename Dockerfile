@@ -5,7 +5,7 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
 # Chrome is only needed at runtime; don't download it in the build stage.
-ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_DOWNLOAD=false
 COPY package.json package-lock.json ./
 RUN npm ci
 
@@ -35,7 +35,6 @@ RUN apt-get update \
  && apt-get purge -y unzip \
  && rm -rf /var/lib/apt/lists/* \
  && npm cache clean --force \
- && npx puppeteer browsers install chrome
  && chown -R node:node /app/.cache
 
 COPY --from=build /app/dist ./dist
