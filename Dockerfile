@@ -35,6 +35,7 @@ RUN apt-get update \
  && apt-get purge -y unzip \
  && rm -rf /var/lib/apt/lists/* \
  && npm cache clean --force \
+ && npx puppeteer browsers install chrome
  && chown -R node:node /app/.cache
 
 COPY --from=build /app/dist ./dist
