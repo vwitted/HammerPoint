@@ -84,6 +84,8 @@ async def health() -> dict[str, Any]:
     # curl_cffi (for example, a small dev box without the 1 GB Firefox download).
     browser = "unavailable"
     browser_installed = False
+    cache_entries: list[str] = []
+    cache_dir = ""
     try:
         from camoufox.async_api import AsyncCamoufox  # noqa: F401
 
@@ -92,6 +94,9 @@ async def health() -> dict[str, Any]:
         from pathlib import Path
 
         install_dir = Path(platformdirs.user_cache_dir("camoufox"))
+        cache_dir = str(install_dir)
+        if install_dir.exists():
+            cache_entries = sorted(p.name for p in install_dir.iterdir())[:20]
         # Camoufox stores fetched builds in <cache>/browsers/<repo>/<build>/.
         browser_installed = (install_dir / "browsers").exists()
     except Exception as exc:  # pragma: no cover - depends on the installed image
@@ -100,6 +105,8 @@ async def health() -> dict[str, Any]:
         "ok": True,
         "browser": browser,
         "browser_installed": browser_installed,
+        "cache_dir": cache_dir,
+        "cache_entries": cache_entries,
         "impersonate": DEFAULT_IMPERSONATE,
     }
 

@@ -148,7 +148,7 @@ export function mapAtgRawLot(item: any, i: number, siteName: string, idPrefix: s
   };
 }
 
-export const ATG_SCRAPE_TIMEOUT_MS = 45000;
+export const ATG_SCRAPE_TIMEOUT_MS = 60000;
 
 type AtgSidecarAttempt = {
   // null means "try Chrome"; [] means the sidecar answered but there is nothing to return (a
@@ -169,13 +169,15 @@ async function scrapeAtgViaSidecar(
   try {
     const { result, title, status, error } = await scrapePage({
       url: searchUrl,
-      gotoTimeoutMs: 20000,
+      gotoTimeoutMs: 30000,
       waitSelector: 'article.panel.item, .lot-single, [class*="lot-single"]',
-      waitSelectorTimeoutMs: 8000,
+      waitSelectorTimeoutMs: 10000,
       // BidSpotter fills prices from bindBiddingLiveLotData after the cards appear.
       settleMs: 3000,
       evaluateScript: ATG_EXTRACT_LOTS_SCRIPT,
-      attempts: 2,
+      // One attempt fits the 60s budget. Camoufox's cold start plus a WAF challenge can take ~40s
+      // on a shared host; a second attempt would be cut off before it could finish.
+      attempts: 1,
     }, cancelSignal, ATG_SCRAPE_TIMEOUT_MS);
 
     if (cancelSignal?.aborted) return { lots: [], problem: null };
@@ -200,7 +202,7 @@ async function scrapeAtgViaSidecar(
     const problem = () => noteFailure(err, "search page (Camoufox)", cancelSignal);
     console.warn(`[${siteName}] sidecar scraper warning:`, err.message);
     // A sidecar timeout means the site is slow, not that Chrome will be faster; the caller's
-    // 45s budget would be spent twice. Report it now rather than starting a second browser.
+    // 60s budget would be spent twice. Report it now rather than starting a second browser.
     if (/timed? ?out|timeout/i.test(String(err?.message ?? ""))) {
       problem();
       return { lots: [], problem: null };

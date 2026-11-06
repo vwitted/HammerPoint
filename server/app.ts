@@ -32,6 +32,8 @@ export function createApp() {
     res.json({
       ok: true,
       node: process.version,
+      runtime: process.env.SIDECAR_DOCKER === "1" ? "docker" : "native",
+      cpu: process.env.RENDER_CPU_COUNT ?? null,
       sidecar: { configured: Boolean(url), origin, health, managed: getManagedSidecarStatus() },
     });
   });
