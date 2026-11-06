@@ -7,6 +7,8 @@ Auction aggregator: an Express server scrapes UK/US auction sites and streams re
 
 - `npm run dev`: dev server with Vite (port from `PORT`, default 3000)
 - `npm run sidecar`: Python sidecar on port 8877 (Camoufox + curl_cffi); optional in dev
+- Render native Node installs the HTTP sidecar (curl_cffi) via `postinstall`; the Docker image
+  installs the full Camoufox sidecar. See `docs/DEPLOYMENT.md`.
 - `npm run lint`: type check (`tsc --noEmit`)
 - `npm test`: unit and fixture tests; offline, no browser needed
 - `npm run test:rules`: Firestore security rules tests in the emulator (needs Java)

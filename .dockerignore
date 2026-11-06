@@ -13,5 +13,7 @@ docs
 .pylibs
 .npm-cache
 .venv
+.sidecar-libs
+.sidecar-cache
 __pycache__
 *.pyc

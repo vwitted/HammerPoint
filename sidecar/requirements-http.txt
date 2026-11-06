@@ -1,0 +1,5 @@
+# HTTP-only sidecar (curl_cffi + FastAPI). Used on hosts that cannot run a browser, such as
+# Render's native Node runtime. The full browser sidecar uses requirements.txt.
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+curl_cffi==0.17.0

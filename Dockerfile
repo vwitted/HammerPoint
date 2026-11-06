@@ -5,8 +5,10 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
 # Chrome is only needed at runtime; don't download it in the build stage.
-ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_DOWNLOAD=true \
+    SIDECAR_DOCKER=1
 COPY package.json package-lock.json ./
+COPY scripts/install-sidecar.mjs ./scripts/install-sidecar.mjs
 RUN npm ci
 
 COPY . .
@@ -29,9 +31,11 @@ ENV NODE_ENV=production \
     PUPPETEER_SKIP_DOWNLOAD=true \
     SIDECAR_AUTOSTART=1 \
     SIDECAR_PYTHON=/app/.venv/bin/python \
+    SIDECAR_DOCKER=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 COPY package.json package-lock.json ./
+COPY scripts/install-sidecar.mjs ./scripts/install-sidecar.mjs
 # Install production Node deps, then the exact Chrome build Puppeteer expects. The local CLI is
 # used (not `npx`, which can resolve a different Puppeteer) so the browser version always matches.
 RUN apt-get update \

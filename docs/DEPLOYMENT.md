@@ -11,6 +11,31 @@ Any host that runs a container can run it. The Node process starts the sidecar i
 (`SIDECAR_AUTOSTART=1`), waits for its `/health` endpoint, and serves the app on `PORT`. If the
 sidecar cannot start, the server keeps running and providers fall back to Node `fetch` / Chrome.
 
+## Render's native Node runtime
+
+Render can also run the service as a **native Node** service, in which case the `Dockerfile` is
+ignored. The repo handles that too: Render sets `RENDER=true`, so `npm install` runs
+`scripts/install-sidecar.mjs`, which installs the HTTP sidecar (`sidecar/requirements-http.txt`:
+curl_cffi + FastAPI) into `.sidecar-libs` and best-effort downloads the Puppeteer Chrome fallback
+into `.sidecar-cache`. `server/lib/renderEnv.ts` points `SIDECAR_PYTHON`, `PYTHONPATH`,
+`XDG_CACHE_HOME` and `PUPPETEER_CACHE_DIR` at those directories before the server starts.
+
+The native runtime has no package manager, so Camoufox's Firefox (and usually Chrome) cannot run
+there: the HTTP sidecar fixes the TLS/HTTP2 fingerprint and bid lookups, while the browser
+providers use their fallbacks. **To run Camoufox, use the Docker service** (Render → Settings →
+Runtime → Docker, or create the service from the Dockerfile); the image installs both browsers and
+their system libraries. `SIDECAR_CAMOUFOX=1` makes the native install attempt Camoufox anyway.
+
+The browser downloads are deliberately non-fatal: if the plan lacks the disk, memory or time, the
+build still succeeds, `/fetch` (curl_cffi) still works, and the browser providers fall back to
+whatever browser is available. `/api/health` reports whether the sidecar started, whether Python
+packages loaded, and whether the Camoufox browser files were found.
+
+To exercise the same path locally: `SIDECAR_INSTALL=1 npm install`. Set `SIDECAR_BROWSERS=0` to
+install only curl_cffi (no Chrome download), which is enough for the HTTP transport but leaves the
+browser providers on their existing fallbacks.
+
+
 ## What the image needs
 
 | Setting | When | Notes |
@@ -61,9 +86,11 @@ With `SIDECAR_URL` unset, `npm run dev` still works; providers use Node `fetch` 
 All three detect the `Dockerfile` automatically when you connect the GitHub repo:
 
 - **Render**: New → Web Service → pick the repo and the branch you deploy (pushes to that branch
-  redeploy automatically). Choose an instance with ≥3 GB RAM. Add `TRUST_PROXY=1` and
-  `VITE_GOOGLE_MAPS_PLATFORM_KEY` (Render passes environment variables to the Docker build as build
-  args, so the Maps key reaches Vite).
+  redeploy automatically). Either a Docker service (uses this Dockerfile) or a native Node service
+  (runs the sidecar install described above) works. Choose an instance with ≥3 GB RAM. Add
+  `TRUST_PROXY=1` and `VITE_GOOGLE_MAPS_PLATFORM_KEY` (Render passes environment variables to the
+  Docker build as build args, so the Maps key reaches Vite; on the native runtime they are normal
+  build-time variables).
 - **Railway**: New Project → Deploy from GitHub repo. Add the same two variables; Railway passes
   variables to `ARG`s declared in the Dockerfile. Raise memory to 3 GB.
 - **Fly.io**: `fly launch` (choose not to deploy yet), set `memory = "3gb"` in `fly.toml`, then

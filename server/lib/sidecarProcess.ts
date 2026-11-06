@@ -1,9 +1,11 @@
-// Starts the Python sidecar as a child process when SIDECAR_AUTOSTART=1 (the Docker image).
+// Starts the Python sidecar as a child process when SIDECAR_AUTOSTART=1. Both supported hosts do:
+// the Docker image sets it in the environment, and server/lib/renderEnv.ts sets it on Render's
+// native Node runtime (where scripts/install-sidecar.mjs installed the Python packages).
 //
-// Keeping the sidecar in the same container means a push to the deployed branch rebuilds and
-// restarts both halves together, and there is no separate service URL or credential to manage.
-// If it cannot start (for example a developer running plain `npm run dev` without Python), the
-// server keeps running and providers fall back to Node fetch / Chrome.
+// Keeping the sidecar in the same service means a push rebuilds and restarts both halves together,
+// and there is no separate service URL or credential to manage. If it cannot start (for example a
+// developer running plain `npm run dev` without Python), the server keeps running and providers
+// fall back to Node fetch / Chrome.
 import { spawn, type ChildProcess } from "node:child_process";
 import { DEFAULT_SIDECAR_URL, sidecarUrl, waitForSidecar } from "./sidecar";
 

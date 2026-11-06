@@ -1,4 +1,5 @@
 import "dotenv/config";
+import "./server/lib/renderEnv";
 import express from "express";
 import path from "path";
 import { createApp } from "./server/app";

@@ -83,13 +83,25 @@ async def health() -> dict[str, Any]:
     # Camoufox is imported lazily so that /fetch still works in a deployment that only installed
     # curl_cffi (for example, a small dev box without the 1 GB Firefox download).
     browser = "unavailable"
+    browser_installed = False
     try:
         from camoufox.async_api import AsyncCamoufox  # noqa: F401
 
         browser = "available"
+        import platformdirs
+        from pathlib import Path
+
+        install_dir = Path(platformdirs.user_cache_dir("camoufox"))
+        # Camoufox stores fetched builds in <cache>/browsers/<repo>/<build>/.
+        browser_installed = (install_dir / "browsers").exists()
     except Exception as exc:  # pragma: no cover - depends on the installed image
         logger.warning("Camoufox is not available: %s", _short_error(exc))
-    return {"ok": True, "browser": browser, "impersonate": DEFAULT_IMPERSONATE}
+    return {
+        "ok": True,
+        "browser": browser,
+        "browser_installed": browser_installed,
+        "impersonate": DEFAULT_IMPERSONATE,
+    }
 
 
 async def _scrape_once(req: ScrapeRequest) -> ScrapeResponse:
