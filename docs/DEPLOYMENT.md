@@ -15,22 +15,22 @@ sidecar cannot start, the server keeps running and providers fall back to Node `
 
 Render can also run the service as a **native Node** service, in which case the `Dockerfile` is
 ignored. The repo handles that too: Render sets `RENDER=true`, so `npm install` runs
-`scripts/install-sidecar.mjs`, which installs the Python sidecar into `.sidecar-libs`, downloads the
-Puppeteer Chrome fallback and tries the Camoufox browser, all in `.sidecar-cache`.
-`server/lib/renderEnv.ts` points `SIDECAR_PYTHON`, `PYTHONPATH`, `XDG_CACHE_HOME` and
-`PUPPETEER_CACHE_DIR` at those directories before the server starts.
+`scripts/install-sidecar.mjs`, which installs the HTTP sidecar (`sidecar/requirements-http.txt`:
+curl_cffi + FastAPI) into `.sidecar-libs` and downloads the Puppeteer Chrome fallback into
+`.sidecar-cache`. `server/lib/renderEnv.ts` points `SIDECAR_PYTHON`, `PYTHONPATH`,
+`XDG_CACHE_HOME` and `PUPPETEER_CACHE_DIR` at those directories before the server starts.
 
-The native runtime has no package manager. Chrome happens to run there, but Camoufox's Firefox
-needs GTK and friends: if those libraries are absent, the download still succeeds and `/scrape`
-reports the launch error, then the provider falls back to Chrome. **For guaranteed Camoufox, use
-the Docker service** (Render → Settings → Runtime → Docker); the image installs both browsers and
-their system libraries. The native install can skip the Camoufox download entirely with
-`SIDECAR_CAMOUFOX=0`.
+The native runtime has no package manager, so Camoufox's Firefox (GTK etc.) usually cannot run
+there. The HTTP sidecar fixes the TLS/HTTP2 fingerprint and bid lookups; the browser providers use
+Chrome or their existing fallbacks. **For Camoufox, use the Docker service** (Render → Settings →
+Runtime → Docker); the image installs both browsers and their system libraries. Setting
+`SIDECAR_CAMOUFOX=1` makes the native install attempt Camoufox anyway.
 
 The browser downloads are deliberately non-fatal: if the plan lacks the disk, memory or time, the
 build still succeeds, `/fetch` (curl_cffi) still works, and the browser providers fall back to
 whatever browser is available. `/api/health` reports whether the sidecar started, whether Python
-packages loaded, and whether the Camoufox browser files were found.
+packages loaded, whether the Camoufox browser files were found, and whether the process is the
+Docker image or the native runtime.
 
 To exercise the same path locally: `SIDECAR_INSTALL=1 npm install`. Set `SIDECAR_BROWSERS=0` to
 install only curl_cffi (no Chrome download), which is enough for the HTTP transport but leaves the

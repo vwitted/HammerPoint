@@ -12,8 +12,10 @@ if (process.env.RENDER === "true") {
   const root = process.cwd();
   const libs = path.join(root, ".sidecar-libs");
   process.env.PYTHONPATH = [libs, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter);
-  if (!process.env.XDG_CACHE_HOME) process.env.XDG_CACHE_HOME = path.join(root, ".sidecar-cache");
-  if (!process.env.PUPPETEER_CACHE_DIR) {
+  if (process.env.SIDECAR_DOCKER !== "1") {
+    // Native Render already sets XDG_CACHE_HOME to /opt/render/.cache; point it at the directory
+    // the build script populated instead, so Camoufox/Chrome are found after a restart.
+    process.env.XDG_CACHE_HOME = path.join(root, ".sidecar-cache");
     process.env.PUPPETEER_CACHE_DIR = path.join(root, ".sidecar-cache", "puppeteer");
   }
 }

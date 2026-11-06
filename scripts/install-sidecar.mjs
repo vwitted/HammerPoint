@@ -21,7 +21,7 @@ const libs = path.join(root, ".sidecar-libs");
 const cache = path.join(root, ".sidecar-cache");
 const python = process.env.SIDECAR_INSTALL_PYTHON || (process.platform === "win32" ? "python" : "python3");
 const puppeteerCli = path.join(root, "node_modules", ".bin", process.platform === "win32" ? "puppeteer.cmd" : "puppeteer");
-const wantCamoufox = process.env.SIDECAR_CAMOUFOX !== "0";
+const wantCamoufox = process.env.SIDECAR_CAMOUFOX === "1";
 mkdirSync(libs, { recursive: true });
 mkdirSync(cache, { recursive: true });
 
