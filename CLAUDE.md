@@ -50,7 +50,9 @@ Scrapers
 - Every network call needs a timeout. Providers return `[]` on failure rather than throwing.
 - Plain HTTP goes through `lib/http.ts` (`httpFetch`), which uses the sidecar's curl_cffi transport
   when configured and Node `fetch` otherwise. JavaScript pages go through `lib/sidecar.ts`
-  (`scrapePage`, Camoufox) with Chrome as the fallback. Don't call `fetch()` directly in a provider.
+  (`scrapePage`, Camoufox); BidSpotter then falls back to curl_cffi (`httpFetch` +
+  `extractAtgLotsFromHtml`, a jsdom run of the same extraction script) and finally Chrome. Don't
+  call `fetch()` directly in a provider.
 - When a call is blocked, times out or fails, also note it with `lib/sourceHealth.ts` (`noteResponse`,
   `noteFailure`, `noteChallengePage`/`noteChallengeTitle`) so the search shows why a source came back
   empty. If a fallback then succeeds, don't report the first attempt.

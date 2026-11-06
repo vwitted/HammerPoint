@@ -1,25 +1,18 @@
 // BidSpotter / The Saleroom (ATG network). In production the extraction script runs inside
-// headless Chrome; here it runs in jsdom against a saved BidSpotter results page.
+// headless Chrome (Camoufox), or in jsdom against the server-rendered HTML when Camoufox falls back
+// to curl_cffi; here it runs against a saved BidSpotter results page through the same helper.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { JSDOM, VirtualConsole } from "jsdom";
-import { ATG_EXTRACT_LOTS_SCRIPT, mapAtgRawLot } from "../server/providers/atg.ts";
+import { extractAtgLotsFromHtml, mapAtgRawLot } from "../server/providers/atg.ts";
 import { startReplay } from "./helpers/replay.ts";
 import { assertMatchesSnapshot } from "./helpers/snapshot.ts";
 
+const FIXTURE_URL = "https://www.bidspotter.co.uk/en-gb/search-results?searchTerm=lathe";
+
 function extractFromSavedPage() {
   const html = readFileSync(new URL("./fixtures/bidspotter-search-lathe.html", import.meta.url), "utf8");
-  const dom = new JSDOM(html, {
-    url: "https://www.bidspotter.co.uk/en-gb/search-results?searchTerm=lathe",
-    runScripts: "outside-only", // the page's own scripts never run
-    virtualConsole: new VirtualConsole(), // silence CSS parse warnings from the saved page
-  });
-  try {
-    return dom.window.eval(ATG_EXTRACT_LOTS_SCRIPT) as any[];
-  } finally {
-    dom.window.close();
-  }
+  return extractAtgLotsFromHtml(html, FIXTURE_URL);
 }
 
 describe("ATG lot card extraction (BidSpotter page)", () => {

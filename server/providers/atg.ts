@@ -1,8 +1,11 @@
 import puppeteer from "puppeteer";
+import { JSDOM, VirtualConsole } from "jsdom";
 import { categorizeByTitle } from "../lib/categories";
 import { getCoordinatesForLocation } from "../lib/geo";
+import { httpFetch } from "../lib/http";
 import { isSidecarEnabled, scrapePage } from "../lib/sidecar";
-import { noteChallengePage, noteChallengeTitle, noteFailure, reportSourceIssue } from "../lib/sourceHealth";
+import { cleanHtmlText } from "../lib/text";
+import { noteChallengePage, noteChallengeTitle, noteFailure, noteResponse, reportSourceIssue } from "../lib/sourceHealth";
 
 // Dedicated BidSpotter UK scraper via Puppeteer
 // The only provider that runs through a mobile proxy for now (see sidecar/main.py PROXIES).
@@ -151,11 +154,29 @@ export function mapAtgRawLot(item: any, i: number, siteName: string, idPrefix: s
   };
 }
 
-export const ATG_SCRAPE_TIMEOUT_MS = 60000;
+// Runs ATG_EXTRACT_LOTS_SCRIPT against server-rendered HTML (no browser). Used by the curl_cffi
+// fallback, and by tests, so the DOM extraction is defined in exactly one place.
+export function extractAtgLotsFromHtml(html: string, url: string): any[] {
+  const dom = new JSDOM(html, {
+    url,
+    runScripts: "outside-only",
+    virtualConsole: new VirtualConsole(), // silence CSS parse warnings
+  });
+  try {
+    return dom.window.eval(ATG_EXTRACT_LOTS_SCRIPT) as any[];
+  } finally {
+    dom.window.close();
+  }
+}
+
+// Camoufox cold start plus a mobile proxy hop can be slow; give it headroom before failing over.
+export const ATG_SCRAPE_TIMEOUT_MS = 90_000;
+// The curl_cffi fallback fetches one HTML page and parses it; it needs far less time.
+const ATG_FETCH_TIMEOUT_MS = 30_000;
 
 type AtgSidecarAttempt = {
-  // null means "try Chrome"; [] means the sidecar answered but there is nothing to return (a
-  // challenge or a timeout), so a second browser would only repeat the wait.
+  // null means "try the next fallback"; [] means the sidecar answered but there is nothing to
+  // return (a challenge or a timeout), so a second attempt would only repeat the wait.
   lots: any[] | null;
   // Called only if the Chrome fallback also produces no lots, so a successful fallback does not
   // report a problem that the visitor never experienced.
@@ -173,14 +194,14 @@ async function scrapeAtgViaSidecar(
   try {
     const { result, title, status, error } = await scrapePage({
       url: searchUrl,
-      gotoTimeoutMs: 30000,
+      gotoTimeoutMs: 45000,
       waitSelector: 'article.panel.item, .lot-single, [class*="lot-single"]',
-      waitSelectorTimeoutMs: 10000,
+      waitSelectorTimeoutMs: 15000,
       // BidSpotter fills prices from bindBiddingLiveLotData after the cards appear.
       settleMs: 3000,
       evaluateScript: ATG_EXTRACT_LOTS_SCRIPT,
-      // One attempt fits the 60s budget. Camoufox's cold start plus a WAF challenge can take ~40s
-      // on a shared host; a second attempt would be cut off before it could finish.
+      // One attempt fits the budget. Camoufox's cold start plus a proxy hop and a WAF challenge can
+      // take ~60s on a shared host; a second attempt would be cut off before it could finish.
       attempts: 1,
       proxyProfile,
       blockImages: true,
@@ -194,9 +215,9 @@ async function scrapeAtgViaSidecar(
     console.log(`[${siteName}] path=sidecar count=${rawLots.length}`);
     if (rawLots.length === 0) {
       // A clean-looking empty page is the failure mode that hid HiBid's broken fast path for
-      // months; try Chrome before giving up. A genuinely empty search is not a site problem, so
-      // there is nothing to report if Chrome is empty too.
-      console.warn(`[${siteName}] sidecar returned no lots (HTTP ${status}); trying Chrome`);
+      // months; try the curl_cffi fallback before giving up. A genuinely empty search is not a
+      // site problem, so there is nothing to report if every fallback is empty too.
+      console.warn(`[${siteName}] sidecar returned no lots (HTTP ${status}); trying curl_cffi`);
       return { lots: null, problem: null };
     }
     return {
@@ -207,12 +228,60 @@ async function scrapeAtgViaSidecar(
     if (cancelSignal?.aborted) return { lots: [], problem: null };
     const problem = () => noteFailure(err, "search page (Camoufox)", cancelSignal);
     console.warn(`[${siteName}] sidecar scraper warning:`, err.message);
-    // A sidecar timeout means the site is slow, not that Chrome will be faster; the caller's
-    // 60s budget would be spent twice. Report it now rather than starting a second browser.
+    // A sidecar timeout means the site is slow, not that a direct fetch will be faster; the
+    // 90s budget would be spent twice. Report it now rather than starting another attempt.
     if (/timed? ?out|timeout/i.test(String(err?.message ?? ""))) {
       problem();
       return { lots: [], problem: null };
     }
+    return { lots: null, problem };
+  }
+}
+
+// curl_cffi fallback: BidSpotter's search page is server-rendered, so when Camoufox cannot load it
+// we fetch the HTML directly (through the same proxy) and run the same DOM extraction in jsdom.
+async function scrapeAtgViaFetch(
+  searchUrl: string,
+  siteName: string,
+  idPrefix: string,
+  cancelSignal?: AbortSignal,
+  proxyProfile?: string,
+): Promise<AtgSidecarAttempt> {
+  try {
+    const res = await httpFetch(searchUrl, {
+      headers: {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-GB,en;q=0.9",
+      },
+      proxyProfile,
+    }, cancelSignal, ATG_FETCH_TIMEOUT_MS);
+
+    if (!res.ok) {
+      const problem = () => noteResponse(res, "search page (curl_cffi)");
+      return { lots: null, problem };
+    }
+
+    const html = await res.text();
+    const pageTitle = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "";
+    if (noteChallengeTitle(cleanHtmlText(pageTitle), "search page (curl_cffi)")) {
+      return { lots: [], problem: null };
+    }
+
+    const rawLots = extractAtgLotsFromHtml(html, searchUrl);
+    console.log(`[${siteName}] path=curl_cffi count=${rawLots.length}`);
+    if (rawLots.length === 0) {
+      // SSR without the lot cards is the same trap that hid HiBid's broken fast path.
+      console.warn(`[${siteName}] curl_cffi parsed no lots; trying Chrome`);
+      return { lots: null, problem: null };
+    }
+    return {
+      lots: rawLots.map((item: any, i: number) => mapAtgRawLot(item, i, siteName, idPrefix)),
+      problem: null,
+    };
+  } catch (err: any) {
+    if (cancelSignal?.aborted) return { lots: [], problem: null };
+    const problem = () => noteFailure(err, "search page (curl_cffi)", cancelSignal);
+    console.warn(`[${siteName}] curl_cffi fallback error:`, err.message);
     return { lots: null, problem };
   }
 }
@@ -334,18 +403,23 @@ export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, i
 
   const searchUrl = `${baseUrl}/en-gb/search-results?searchTerm=${encodeURIComponent(keyword)}`;
 
-  // Preferred path: Camoufox (patched Firefox, real fingerprint). Falls back to Chrome when the
-  // sidecar is not configured or cannot launch, so local development and the fixture tests keep
-  // working without Python.
-  let sidecarProblem: (() => void) | null = null;
+  // Preferred path: Camoufox (patched Firefox, real fingerprint), then curl_cffi against the
+  // server-rendered page, then Chrome. Each reports its problem only if every later fallback also
+  // comes up empty, so a successful fallback never reports a failure the visitor didn't experience.
+  let primaryProblem: (() => void) | null = null;
   if (isSidecarEnabled()) {
     const attempt = await scrapeAtgViaSidecar(searchUrl, siteName, idPrefix, cancelSignal, proxyProfile);
     if (attempt.lots !== null) return attempt.lots;
-    sidecarProblem = attempt.problem;
+    primaryProblem = attempt.problem;
+    if (cancelSignal?.aborted) return [];
+
+    const fetched = await scrapeAtgViaFetch(searchUrl, siteName, idPrefix, cancelSignal, proxyProfile);
+    if (fetched.lots !== null) return fetched.lots;
+    if (fetched.problem && !primaryProblem) primaryProblem = fetched.problem;
     if (cancelSignal?.aborted) return [];
   }
 
   const lots = await scrapeAtgViaChrome(searchUrl, siteName, idPrefix, cancelSignal);
-  if (lots.length === 0) sidecarProblem?.();
+  if (lots.length === 0) primaryProblem?.();
   return lots;
 }
