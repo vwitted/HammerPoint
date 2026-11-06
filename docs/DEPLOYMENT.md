@@ -15,16 +15,16 @@ sidecar cannot start, the server keeps running and providers fall back to Node `
 
 Render can also run the service as a **native Node** service, in which case the `Dockerfile` is
 ignored. The repo handles that too: Render sets `RENDER=true`, so `npm install` runs
-`scripts/install-sidecar.mjs`, which installs the HTTP sidecar (`sidecar/requirements-http.txt`:
-curl_cffi + FastAPI) into `.sidecar-libs` and downloads the Puppeteer Chrome fallback into
-`.sidecar-cache`. `server/lib/renderEnv.ts` points `SIDECAR_PYTHON`, `PYTHONPATH`,
-`XDG_CACHE_HOME` and `PUPPETEER_CACHE_DIR` at those directories before the server starts.
+`scripts/install-sidecar.mjs`, which installs the full sidecar into `.sidecar-libs`, downloads the
+Camoufox browser, and downloads the Puppeteer Chrome fallback into `.sidecar-cache`.
+`server/lib/renderEnv.ts` points `SIDECAR_PYTHON`, `PYTHONPATH`, `XDG_CACHE_HOME` and
+`PUPPETEER_CACHE_DIR` at those directories before the server starts.
 
-The native runtime has no package manager, so Camoufox's Firefox (GTK etc.) usually cannot run
-there. The HTTP sidecar fixes the TLS/HTTP2 fingerprint and bid lookups; the browser providers use
-Chrome or their existing fallbacks. **For Camoufox, use the Docker service** (Render → Settings →
-Runtime → Docker); the image installs both browsers and their system libraries. Setting
-`SIDECAR_CAMOUFOX=1` makes the native install attempt Camoufox anyway.
+The native runtime has no package manager, so Camoufox's Firefox needs libraries the runtime may
+not provide. If the download or launch fails, `/scrape` reports it and the provider falls back to
+Chrome; the build still succeeds. Set `SIDECAR_CAMOUFOX=0` to skip the Camoufox download entirely
+on a small plan. **For guaranteed Camoufox, use the Docker service** (Render → Settings → Runtime →
+Docker); the image installs both browsers and their system libraries.
 
 The browser downloads are deliberately non-fatal: if the plan lacks the disk, memory or time, the
 build still succeeds, `/fetch` (curl_cffi) still works, and the browser providers fall back to
