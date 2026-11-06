@@ -69,12 +69,17 @@ export function noteFailure(err: unknown, step: string, cancelSignal?: AbortSign
 // ("Human Verification" is AWS WAF's CAPTCHA page, seen on BidSpotter.)
 const CHALLENGE_TITLE = /just a moment|attention required|access denied|human verification|verify(ing)? you are human|security check|pardon our interruption/i;
 
-// Notes a Chrome page that is a bot check rather than the site. Returns true if it is.
-export async function noteChallengePage(page: { title(): Promise<string> }, step: string): Promise<boolean> {
-  const title = await page.title().catch(() => "");
+// Notes a page title that is a bot check rather than the site. Returns true if it is.
+// Shared by the Chrome and the Camoufox sidecar paths.
+export function noteChallengeTitle(title: string, step: string): boolean {
   if (!CHALLENGE_TITLE.test(title)) return false;
   reportSourceIssue("blocked", step, `bot check page ("${title.slice(0, 60)}")`);
   return true;
+}
+
+// Notes a Chrome page that is a bot check rather than the site. Returns true if it is.
+export async function noteChallengePage(page: { title(): Promise<string> }, step: string): Promise<boolean> {
+  return noteChallengeTitle(await page.title().catch(() => ""), step);
 }
 
 // One-line summary for logs and the status chip, e.g. "bid lookups blocked (Cloudflare challenge, 35×)".

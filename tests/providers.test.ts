@@ -7,7 +7,7 @@
 //   If a change is intended, review the diff and run `npm run test:update-snapshots`.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { FIXTURE_NOW, HTTP2_PREFIX, loadFixture, startReplay } from "./helpers/replay.ts";
+import { FIXTURE_NOW, loadFixture, startReplay } from "./helpers/replay.ts";
 import { assertMatchesSnapshot } from "./helpers/snapshot.ts";
 import { fetchLiveAuctioneersLots } from "../server/providers/liveAuctioneers.ts";
 import { scrapeTheSaleroomLots } from "../server/providers/theSaleroom.ts";
@@ -116,15 +116,14 @@ describe("Easy Live Auction", () => {
     assert.equal(noBidBox.bidLabel, undefined);
   });
 
-  it("looks bids up over HTTP/2 when Cloudflare challenges the HTTP/1.1 request", async () => {
+  it("gets bid boxes through the sidecar when plain HTTP/1.1 is challenged", async () => {
     const { lots, unmatched, attempted } = await runWithFixture("easyLiveBlocked", () => fetchEasyLiveAuctionLots("lawn mower", 35, 0));
     assert.deepEqual(unmatched, []);
     assertValidListings(lots, 5);
-    // One fetch probe is challenged; then every lot (the probed one included) goes over HTTP/2.
-    const fetchLookups = attempted.filter((k) => !k.startsWith(HTTP2_PREFIX) && k.includes("doRefreshTimedBidding"));
-    const http2Lookups = attempted.filter((k) => k.startsWith(HTTP2_PREFIX));
-    assert.equal(fetchLookups.length, 1);
-    assert.equal(http2Lookups.length, 5);
+    // The fixture contains the old HTTP/1.1 403 and the HTTP/2 200 for the same lookup; the sidecar
+    // is modelled as returning the successful response, so every lot is one lookup.
+    const bidLookups = attempted.filter((k) => k.includes("doRefreshTimedBidding"));
+    assert.equal(bidLookups.length, 5);
 
     const byId = (id: string) => lots.find((l) => l.id === `easylive-${id}`)!;
     // Lot 9009, 1 x Honda petrol engine lawn mower: est £12 - £20, bid box "Current Bid: 7 GBP",
@@ -212,7 +211,7 @@ describe("cancellation", () => {
     ["LiveAuctioneers", "liveAuctioneers", (signal) => fetchLiveAuctioneersLots("lathe", signal)],
     ["The Saleroom", "theSaleroom", (signal) => scrapeTheSaleroomLots("lathe", signal)],
     ["Easy Live", "easyLive", (signal) => fetchEasyLiveAuctionLots("lathe", 35, 0, signal)],
-    ["Easy Live (HTTP/2 fallback)", "easyLiveBlocked", (signal) => fetchEasyLiveAuctionLots("lawn mower", 35, 0, signal)],
+    ["Easy Live (challenged search)", "easyLiveBlocked", (signal) => fetchEasyLiveAuctionLots("lawn mower", 35, 0, signal)],
     ["BPI", "bpi", (signal) => scrapeBpiLots("", 2, signal)],
     ["HiBid", "hibid", (signal) => scrapeHibidLots("lathe", "", signal)],
     ["SVD", "svd", (signal) => scrapeSvdUpcomingAuctions("", signal)],

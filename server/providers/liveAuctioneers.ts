@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { withCancel } from "../lib/cancel";
+import { httpFetch } from "../lib/http";
 import { noteFailure, noteResponse } from "../lib/sourceHealth";
 import { categorizeByTitle } from "../lib/categories";
 import { getCoordinatesForLocation } from "../lib/geo";
@@ -20,18 +20,11 @@ export async function fetchLiveAuctioneersLots(keyword: string, cancelSignal?: A
     const deviceId = crypto.randomUUID();
     const url = `https://search-party-prod.liveauctioneers.com/search/v4/web?parameters=${encodeURIComponent(JSON.stringify(searchParameters))}&deviceId=${deviceId}`;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-    const res = await fetch(url, {
+    const res = await httpFetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-        "Connection": "close"
-      },
-      signal: withCancel(controller.signal, cancelSignal)
-    });
-    clearTimeout(timeoutId);
+        "Accept": "application/json"
+      }
+    }, cancelSignal, 15000);
 
     if (!res.ok) {
       console.warn(`LiveAuctioneers search returned status: ${res.status}`);

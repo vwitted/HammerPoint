@@ -9,3 +9,9 @@ coverage
 .DS_Store
 tests
 docs
+.tmp
+.pylibs
+.npm-cache
+.venv
+__pycache__
+*.pyc

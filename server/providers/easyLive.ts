@@ -1,9 +1,8 @@
 import { getCoordinatesForLocation } from "../lib/geo";
-import { withCancel } from "../lib/cancel";
 import { categorizeByTitle } from "../lib/categories";
 import { cleanHtmlText } from "../lib/text";
 import { parseUkLocalDateTime } from "../lib/dates";
-import { http2Client } from "../lib/http2";
+import { httpFetch } from "../lib/http";
 import { noteFailure, noteResponse, reportSourceIssue } from "../lib/sourceHealth";
 
 export interface EasyLiveHit {
@@ -187,44 +186,34 @@ const EASYLIVE_ORIGIN = "https://www.easyliveauction.com";
 const BID_REFRESH_URL = `${EASYLIVE_ORIGIN}/components/catalogue_components.cfc?method=doRefreshTimedBidding`;
 const BID_REFRESH_TIMEOUT_MS = 15000;
 
-type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal }) => Promise<Response>;
-
-// Cloudflare's "Just a moment..." page. Easy Live sends it to HTTP/1.1 clients such as Node's
-// fetch, but serves the same request over HTTP/2.
+// Cloudflare's "Just a moment..." page. curl_cffi normally avoids it, but if the site tightens
+// its rules the response still carries this header, and the search should say why bids are missing.
 function isCloudflareChallenge(res: Response): boolean {
   return res.headers.get("cf-mitigated") === "challenge";
 }
 
 // Asks Easy Live for a lot's bid box. Returns the parsed data, null when there is none (the site
 // answers "{}" for live-sale lots without one), or "blocked" for a Cloudflare challenge.
-async function requestBidInfo(send: FetchLike, lotHash: string, cancelSignal?: AbortSignal): Promise<any | null | "blocked"> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), BID_REFRESH_TIMEOUT_MS);
+async function requestBidInfo(lotHash: string, cancelSignal?: AbortSignal): Promise<any | null | "blocked"> {
+  const res = await httpFetch(BID_REFRESH_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      "X-Requested-With": "XMLHttpRequest"
+    },
+    body: "data=" + encodeURIComponent(JSON.stringify({ lot: lotHash, l: "0" })),
+  }, cancelSignal, BID_REFRESH_TIMEOUT_MS);
+  if (isCloudflareChallenge(res)) return "blocked";
+  if (!res.ok) {
+    noteResponse(res, "bid lookups");
+    return null;
+  }
+  const clean = (await res.text()).replace(/^\/\//, "").trim();
+  if (!clean || clean === "{}") return null;
   try {
-    const res = await send(BID_REFRESH_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "X-Requested-With": "XMLHttpRequest",
-        "User-Agent": "Mozilla/5.0",
-      },
-      body: "data=" + encodeURIComponent(JSON.stringify({ lot: lotHash, l: "0" })),
-      signal: withCancel(controller.signal, cancelSignal),
-    });
-    if (isCloudflareChallenge(res)) return "blocked";
-    if (!res.ok) {
-      noteResponse(res, "bid lookups");
-      return null;
-    }
-    const clean = (await res.text()).replace(/^\/\//, "").trim();
-    if (!clean || clean === "{}") return null;
-    try {
-      return JSON.parse(clean);
-    } catch {
-      return null;
-    }
-  } finally {
-    clearTimeout(timeoutId);
+    return JSON.parse(clean);
+  } catch {
+    return null;
   }
 }
 
@@ -272,8 +261,8 @@ function applyBidInfo(lot: any, info: any): void {
 }
 
 // Enrich Easy Live Auction lots with the live bid and exact times from each lot's bid box.
-// Tries fetch on one lot first; if Cloudflare challenges it, every lookup goes over HTTP/2
-// instead, on one shared connection, so a blocked search costs one wasted request, not 35.
+// The sidecar's curl_cffi transport normally passes Cloudflare; if it is challenged anyway the
+// lookup is reported as blocked rather than silently leaving the lot unpriced.
 export async function enrichEasyLiveTimedBidding(lots: any[], cancelSignal?: AbortSignal): Promise<any[]> {
   const lookups: { lot: any; lotHash: string }[] = [];
   for (const lot of lots) {
@@ -286,39 +275,23 @@ export async function enrichEasyLiveTimedBidding(lots: any[], cancelSignal?: Abo
   }
   if (lookups.length === 0) return lots;
 
-  const lookUp = async (send: FetchLike, { lot, lotHash }: { lot: any; lotHash: string }, overHttp2 = false) => {
-    const info = await requestBidInfo(send, lotHash, cancelSignal);
+  const lookUp = async ({ lot, lotHash }: { lot: any; lotHash: string }) => {
+    const info = await requestBidInfo(lotHash, cancelSignal);
     if (info === "blocked") {
-      // Expected over HTTP/1.1 (that's what triggers the HTTP/2 fallback); a problem over HTTP/2.
-      if (overHttp2) reportSourceIssue("blocked", "bid lookups", "Cloudflare challenge");
-      return "blocked";
+      reportSourceIssue("blocked", "bid lookups", "Cloudflare challenge");
+      return;
     }
     if (info) {
       easyLiveBidCache.set(lotHash, { timestamp: Date.now(), data: info });
       applyBidInfo(lot, info);
     }
-    return "done";
   };
   // A failed lookup leaves that lot without a bid; it never fails the search.
   const settle = (p: Promise<unknown>) => p.catch((err) => {
     noteFailure(err, "bid lookups", cancelSignal);
-    return "failed";
   });
 
-  const [first, ...rest] = lookups;
-  if (await settle(lookUp(fetch, first)) !== "blocked") {
-    await Promise.all(rest.map((l) => settle(lookUp(fetch, l))));
-    return lots;
-  }
-
-  if (cancelSignal?.aborted) return lots;
-  console.log(`[Easy Live] Bid lookup challenged over HTTP/1.1; looking up ${lookups.length} lots over HTTP/2`);
-  const session = http2Client.openSession(EASYLIVE_ORIGIN, { connectTimeoutMs: 10000, signal: cancelSignal });
-  try {
-    await Promise.all(lookups.map((l) => settle(lookUp(session.fetch, l, true))));
-  } finally {
-    session.close();
-  }
+  await Promise.all(lookups.map((lookup) => settle(lookUp(lookup))));
   return lots;
 }
 
@@ -336,22 +309,15 @@ export async function fetchEasyLiveAuctionLots(keyword: string, hitsPerPage: num
       ]
     };
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-    const res = await fetch(url, {
+    const res = await httpFetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-Algolia-Application-Id": "KBISTY43U6",
-        "X-Algolia-API-Key": "917b17098c0702d97a62a6ca8fc1f410",
-        "Connection": "close",
-        "User-Agent": "Mozilla/5.0"
+        "X-Algolia-API-Key": "917b17098c0702d97a62a6ca8fc1f410"
       },
-      body: JSON.stringify(body),
-      signal: withCancel(controller.signal, cancelSignal)
-    });
-    clearTimeout(timeoutId);
+      body: JSON.stringify(body)
+    }, cancelSignal, 15000);
 
     if (!res.ok) {
       console.warn(`EasyLive Algolia fetch returned status ${res.status}`);

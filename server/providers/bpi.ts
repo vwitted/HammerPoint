@@ -1,5 +1,6 @@
 import puppeteer from "puppeteer";
-import { closeBrowserOnCancel, withCancel } from "../lib/cancel";
+import { closeBrowserOnCancel } from "../lib/cancel";
+import { httpFetch } from "../lib/http";
 import { noteFailure, noteResponse } from "../lib/sourceHealth";
 import { getCoordinatesForLocation } from "../lib/geo";
 import { cleanHtmlText } from "../lib/text";
@@ -34,31 +35,19 @@ export async function fetchArtisioHeadersCompliant(options: ArtisioRequestOption
     "artisio-language": "en",
     "dnt": "1",
     "origin": originUrl,
-    "priority": "u=1, i",
     "referer": refererUrl,
-    "sec-ch-ua": '"Google Chrome";v="149", "Chromium";v="149", "Not)A;Brand";v="24"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"Windows"',
     "sec-fetch-dest": "empty",
     "sec-fetch-mode": "cors",
-    "sec-fetch-site": "cross-site",
-    "Connection": "close",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+    "sec-fetch-site": "cross-site"
   };
 
   // Reported only if the Chrome fallback fails too.
   let directProblem: () => void = () => {};
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
-
-    const res = await fetch(url, {
+    const res = await httpFetch(url, {
       method: "GET",
-      headers: compliantHeaders,
-      signal: withCancel(controller.signal, cancelSignal)
-    });
-
-    clearTimeout(timeoutId);
+      headers: compliantHeaders
+    }, cancelSignal, 12000);
 
     if (res.ok) {
       const json = await res.json();

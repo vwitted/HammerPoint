@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+.tmp/
+.pylibs/
+.npm-cache/
+.venv/
+__pycache__/
+*.pyc

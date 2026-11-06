@@ -9,9 +9,10 @@
     "start": "node build/server.cjs",
     "clean": "rm -rf dist build",
     "lint": "tsc --noEmit",
-    "test": "node --import tsx --test 'tests/*.test.ts'",
+    "sidecar": "python -m uvicorn sidecar.main:app --host 127.0.0.1 --port 8877",
+    "test": "node --import tsx --test --test-isolation=none tests/atg.test.ts tests/http.test.ts tests/hibid.test.ts tests/lib.test.ts tests/lotDisplay.test.ts tests/prices.test.ts tests/providers.test.ts tests/safeFetch.test.ts tests/searchCache.test.ts tests/sourceHealth.test.ts tests/sourceStatus.test.ts",
     "test:rules": "firebase emulators:exec --only firestore --project demo-hammerpoint \"node --import tsx --test 'tests/rules/*.test.ts'\"",
-    "test:update-snapshots": "UPDATE_SNAPSHOTS=1 node --import tsx --test 'tests/*.test.ts'"
+    "test:update-snapshots": "node --import tsx --test --test-isolation=none tests/update-snapshots.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

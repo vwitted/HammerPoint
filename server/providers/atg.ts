@@ -1,7 +1,8 @@
 import puppeteer from "puppeteer";
 import { categorizeByTitle } from "../lib/categories";
 import { getCoordinatesForLocation } from "../lib/geo";
-import { noteChallengePage, noteFailure, reportSourceIssue } from "../lib/sourceHealth";
+import { isSidecarEnabled, scrapePage } from "../lib/sidecar";
+import { noteChallengePage, noteChallengeTitle, noteFailure, reportSourceIssue } from "../lib/sourceHealth";
 
 // Dedicated BidSpotter UK scraper via Puppeteer
 export async function scrapeBidspotterLots(keyword: string, cancelSignal?: AbortSignal): Promise<any[]> {
@@ -149,10 +150,73 @@ export function mapAtgRawLot(item: any, i: number, siteName: string, idPrefix: s
 
 export const ATG_SCRAPE_TIMEOUT_MS = 45000;
 
-// Robust ATG Network browser scraper (used for BidSpotter and as fallback for The Saleroom)
-export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, idPrefix: string, keyword: string, cancelSignal?: AbortSignal): Promise<any[]> {
-  if (cancelSignal?.aborted) return [];
+type AtgSidecarAttempt = {
+  // null means "try Chrome"; [] means the sidecar answered but there is nothing to return (a
+  // challenge or a timeout), so a second browser would only repeat the wait.
+  lots: any[] | null;
+  // Called only if the Chrome fallback also produces no lots, so a successful fallback does not
+  // report a problem that the visitor never experienced.
+  problem: (() => void) | null;
+};
 
+// Runs the extraction script in a real Camoufox session through the Python sidecar.
+async function scrapeAtgViaSidecar(
+  searchUrl: string,
+  siteName: string,
+  idPrefix: string,
+  cancelSignal?: AbortSignal,
+): Promise<AtgSidecarAttempt> {
+  try {
+    const { result, title, status, error } = await scrapePage({
+      url: searchUrl,
+      gotoTimeoutMs: 20000,
+      waitSelector: 'article.panel.item, .lot-single, [class*="lot-single"]',
+      waitSelectorTimeoutMs: 8000,
+      // BidSpotter fills prices from bindBiddingLiveLotData after the cards appear.
+      settleMs: 3000,
+      evaluateScript: ATG_EXTRACT_LOTS_SCRIPT,
+      attempts: 2,
+    }, cancelSignal, ATG_SCRAPE_TIMEOUT_MS);
+
+    if (cancelSignal?.aborted) return { lots: [], problem: null };
+    if (noteChallengeTitle(title, "search page (Camoufox)")) return { lots: [], problem: null };
+    if (error) throw new Error(error);
+
+    const rawLots = Array.isArray(result) ? result : [];
+    console.log(`[${siteName}] path=sidecar count=${rawLots.length}`);
+    if (rawLots.length === 0) {
+      // A clean-looking empty page is the failure mode that hid HiBid's broken fast path for
+      // months; try Chrome before giving up. A genuinely empty search is not a site problem, so
+      // there is nothing to report if Chrome is empty too.
+      console.warn(`[${siteName}] sidecar returned no lots (HTTP ${status}); trying Chrome`);
+      return { lots: null, problem: null };
+    }
+    return {
+      lots: rawLots.map((item: any, i: number) => mapAtgRawLot(item, i, siteName, idPrefix)),
+      problem: null,
+    };
+  } catch (err: any) {
+    if (cancelSignal?.aborted) return { lots: [], problem: null };
+    const problem = () => noteFailure(err, "search page (Camoufox)", cancelSignal);
+    console.warn(`[${siteName}] sidecar scraper warning:`, err.message);
+    // A sidecar timeout means the site is slow, not that Chrome will be faster; the caller's
+    // 45s budget would be spent twice. Report it now rather than starting a second browser.
+    if (/timed? ?out|timeout/i.test(String(err?.message ?? ""))) {
+      problem();
+      return { lots: [], problem: null };
+    }
+    return { lots: null, problem };
+  }
+}
+
+// Last-resort Chrome path. Kept because it works in environments without the sidecar and gives
+// Camoufox a second chance if a page changes shape.
+async function scrapeAtgViaChrome(
+  searchUrl: string,
+  siteName: string,
+  idPrefix: string,
+  cancelSignal?: AbortSignal,
+): Promise<any[]> {
   let browser: any = null;
   let stopped = false;
   let timeoutId: NodeJS.Timeout | undefined;
@@ -202,7 +266,6 @@ export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, i
         'sec-ch-ua-platform': '"Windows"'
       });
 
-      const searchUrl = `${baseUrl}/en-gb/search-results?searchTerm=${encodeURIComponent(keyword)}`;
       try {
         await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 20000 });
       } catch {
@@ -216,7 +279,7 @@ export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, i
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           await page.waitForSelector('article.panel.item, .lot-single, [class*="lot-single"]', { timeout: 8000 }).catch(() => {});
-          
+
           const cardCount = await page.evaluate(() => document.querySelectorAll('article.panel.item, .lot-single, [class*="lot-single"]').length);
           if (cardCount > 0) {
             // Wait for asynchronous BidSpotter pricing scripts (bindBiddingLiveLotData) to populate bids
@@ -235,7 +298,9 @@ export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, i
         }
       }
 
-      return (rawLots || []).map((item: any, i: number) => mapAtgRawLot(item, i, siteName, idPrefix));
+      const mapped = (rawLots || []).map((item: any, i: number) => mapAtgRawLot(item, i, siteName, idPrefix));
+      console.log(`[${siteName}] path=chrome count=${mapped.length}`);
+      return mapped;
     } catch (err: any) {
       console.warn(`[${siteName}] Scraper warning:`, err.message);
       if (!stopped) noteFailure(err, "search page (Chrome)", cancelSignal);
@@ -253,4 +318,26 @@ export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, i
     clearTimeout(timeoutId);
     cancelSignal?.removeEventListener("abort", onCancel);
   }
+}
+
+// Robust ATG Network browser scraper (used for BidSpotter and as fallback for The Saleroom)
+export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, idPrefix: string, keyword: string, cancelSignal?: AbortSignal): Promise<any[]> {
+  if (cancelSignal?.aborted) return [];
+
+  const searchUrl = `${baseUrl}/en-gb/search-results?searchTerm=${encodeURIComponent(keyword)}`;
+
+  // Preferred path: Camoufox (patched Firefox, real fingerprint). Falls back to Chrome when the
+  // sidecar is not configured or cannot launch, so local development and the fixture tests keep
+  // working without Python.
+  let sidecarProblem: (() => void) | null = null;
+  if (isSidecarEnabled()) {
+    const attempt = await scrapeAtgViaSidecar(searchUrl, siteName, idPrefix, cancelSignal);
+    if (attempt.lots !== null) return attempt.lots;
+    sidecarProblem = attempt.problem;
+    if (cancelSignal?.aborted) return [];
+  }
+
+  const lots = await scrapeAtgViaChrome(searchUrl, siteName, idPrefix, cancelSignal);
+  if (lots.length === 0) sidecarProblem?.();
+  return lots;
 }

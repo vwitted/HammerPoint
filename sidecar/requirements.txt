@@ -1,0 +1,6 @@
+# Pinned so the TLS fingerprint and browser API cannot change under us on a redeploy.
+# (`camoufox` follows the "official/stable" browser channel; bump deliberately, not automatically.)
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+curl_cffi==0.17.0
+camoufox==0.5.9

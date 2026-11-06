@@ -80,23 +80,23 @@ async function runCollecting(requests: ReturnType<typeof loadFixture>, task: () 
 }
 
 describe("problems reported by providers", () => {
-  it("Easy Live: nothing to report when the HTTP/2 fallback gets the bids", async () => {
+  it("Easy Live: nothing to report when the sidecar gets the bids", async () => {
     const { result, issues } = await runCollecting(loadFixture("easyLiveBlocked"), () => fetchEasyLiveAuctionLots("lawn mower", 35, 0));
     assert.equal(result.length, 5);
     assert.deepEqual(issues, []);
   });
 
-  it("Easy Live: reports bid lookups failing when HTTP/2 doesn't work either", async () => {
-    // The real recording, minus its HTTP/2 responses: the fetch probe is challenged and every
-    // HTTP/2 lookup then fails.
+  it("Easy Live: reports bid lookups failing when the sidecar can't get them", async () => {
+    // The real recording, minus its HTTP/2 responses: the sidecar has nothing to replay for four
+    // lookups, and the one recorded lookup is the Cloudflare challenge.
     const withoutHttp2 = loadFixture("easyLiveBlocked").filter((r: any) => r.transport !== "http2");
     const { result, issues } = await runCollecting(withoutHttp2, () => fetchEasyLiveAuctionLots("lawn mower", 35, 0));
     assert.equal(result.length, 5, "lots are still returned, without bids");
     assert.ok(result.every((l) => l.currentPrice == null));
-    assert.equal(issues.length, 1);
-    assert.equal(issues[0].kind, "failed");
-    assert.equal(issues[0].step, "bid lookups");
-    assert.equal(issues[0].count, 5);
+    assert.deepEqual(
+      issues.map((i) => [i.kind, i.step, i.count]).sort(),
+      [["blocked", "bid lookups", 1], ["failed", "bid lookups", 4]],
+    );
   });
 
   it("Easy Live: reports the search failing when its search API can't be reached", async () => {
@@ -110,11 +110,16 @@ describe("problems reported by providers", () => {
     assert.deepEqual(issues, []);
   });
 
-  it("The Saleroom: reports Algolia failing when the Chrome fallback finds nothing either", async () => {
-    // No recorded responses, and the replay helper points Puppeteer at a missing Chrome.
+  it("The Saleroom: reports Algolia failing when both browser fallbacks find nothing either", async () => {
+    // No recorded responses, and the replay helper points both the sidecar scrape and Puppeteer at
+    // missing services, so the Saleroom's Algolia failure is reported after both fallbacks fail.
     const { result, issues } = await runCollecting([], () => scrapeTheSaleroomLots("lathe"));
     assert.deepEqual(result, []);
-    assert.deepEqual(issues.map((i) => [i.kind, i.step]), [["failed", "search page (Chrome)"], ["failed", "search"]]);
+    assert.deepEqual(issues.map((i) => [i.kind, i.step]), [
+      ["failed", "search page (Chrome)"],
+      ["failed", "search page (Camoufox)"],
+      ["failed", "search"],
+    ]);
   });
 });
 

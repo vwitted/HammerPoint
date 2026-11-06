@@ -1,25 +1,178 @@
 import puppeteer from "puppeteer";
 import { closeBrowserOnCancel, withCancel } from "../lib/cancel";
-import { noteChallengePage, noteFailure, noteResponse, reportSourceIssue } from "../lib/sourceHealth";
+import { httpFetch } from "../lib/http";
+import { isSidecarEnabled, scrapePage } from "../lib/sidecar";
+import { noteChallengePage, noteChallengeTitle, noteFailure, noteResponse, reportSourceIssue } from "../lib/sourceHealth";
 import { getCoordinatesForLocation } from "../lib/geo";
 import { inferCategoryFromTitle } from "../lib/categories";
+import { cleanHtmlText } from "../lib/text";
 
 // In-memory cache for single lot details (search results are cached by the search cache)
 export const hibidDetailCache = new Map<string, { timestamp: number; detail: any }>();
 
+// HiBid encodes query separators in image URLs as &amp;. Decode just the entities we use.
+export function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)));
+}
+
+// HiBid renamed its Angular component from <app-lot-tile> to <app-auction-lot-card>. The boundary
+// [\s>] is essential: several other tags start with "app-auction-lot-" (e.g. the badge) and a
+// looser split would shred the HTML into fragments.
+const HIBID_CARD_OPEN = /<app-(?:auction-)?lot-(?:card|tile)[\s>]/;
+const HIBID_CARD_CLOSE = /<\/app-(?:auction-)?lot-(?:card|tile)>/;
+
+function firstMatch(text: string, patterns: RegExp[]): RegExpMatchArray | null {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) return match;
+  }
+  return null;
+}
+
+// Turns one server-rendered HiBid search page into raw lot records. Kept pure so the current
+// markup can be tested against a recorded page without a browser or the network.
+export function parseHibidSearchHtml(html: string): any[] {
+  const parts = String(html ?? "").split(HIBID_CARD_OPEN);
+  const lots: any[] = [];
+  const seen = new Set<string>();
+
+  for (let i = 1; i < parts.length; i++) {
+    const card = parts[i].split(HIBID_CARD_CLOSE)[0];
+    const idMatch = firstMatch(card, [
+      /href="(?:https?:\/\/hibid\.com)?\/lot\/(\d+)(?:[/?#"])/i,
+      /id="lot-(\d+)"/i,
+      /data-lot-id="(\d+)"/i,
+    ]);
+    if (!idMatch) continue;
+    const lotId = idMatch[1];
+    if (seen.has(lotId)) continue;
+    seen.add(lotId);
+
+    const titleMatch = firstMatch(card, [
+      /class="[^"]*app-auction-lot-card__title[^"]*"[^>]*>([\s\S]*?)<\/a>/i,
+      /<h2[^>]*class="[^"]*lot-title[^"]*"[^>]*>([\s\S]*?)<\/h2>/i,
+      /class="[^"]*app-auction-lot-card__image-link[^"]*"[^>]*aria-label="([^"]+)"/i,
+      /aria-label="([^"]+)"[^>]*class="[^"]*app-auction-lot-card__image-link[^"]*"/i,
+      /<img[^>]*alt="([^"]+)"/i,
+    ]);
+    const title = titleMatch ? cleanHtmlText(decodeHtmlEntities(titleMatch[1])) : "";
+    if (!title || title.length < 2) continue;
+
+    const numberMatch = firstMatch(card, [
+      /class="[^"]*app-auction-lot-card__lot-number[^"]*"[^>]*>([\s\S]*?)<\/a>/i,
+      /<span[^>]*class="[^"]*text-primary[^"]*"[^>]*>Lot\s*([^<]+)<\/span>/i,
+    ]);
+    const lotNumber = numberMatch
+      ? cleanHtmlText(decodeHtmlEntities(numberMatch[1])).replace(/^Lot\s*/i, "").trim()
+      : "";
+
+    const imgMatch = firstMatch(card, [
+      /<img[^>]*src="([^"]*cdn\.hibid\.com\/img\.axd[^"]*)"/i,
+      /<img[^>]*data-src="([^"]+)"/i,
+    ]);
+    let imageUrl = imgMatch ? decodeHtmlEntities(imgMatch[1]) : "";
+    if (imageUrl.startsWith("//")) imageUrl = `https:${imageUrl}`;
+
+    const locationMatch = firstMatch(card, [
+      /class="[^"]*search-radius-lot[^"]*"[^>]*aria-label="([^"]+)"/i,
+      /<app-search-radius[^>]*aria-label="([^"]+)"/i,
+      /aria-label="([A-Z][a-zA-Z .'-]+,\s*[A-Z]{2}(?:\s+\d{5})?)"/,
+    ]);
+    let location = locationMatch ? cleanHtmlText(decodeHtmlEntities(locationMatch[1])) : "United States";
+    if (location && !/usa|united states/i.test(location)) location += ", USA";
+
+    // The current markup has a dedicated amount element containing e.g. "$13.00"; the previous
+    // markup printed "High Bid: 0.00 USD". The amount contains a nested currency-symbol <span>,
+    // so take a slice of the element rather than stopping at the first closing tag.
+    const amountMatch = card.match(/class="[^"]*app-auction-lot-card__amount[^"]*"[^>]*>([\s\S]{0,400})/i);
+    const priceSource = amountMatch ? cleanHtmlText(decodeHtmlEntities(amountMatch[1])) : card;
+    const bidMatch = firstMatch(priceSource, [
+      /(?:Current Bid|Opening Bid|High Bid|Bid):?\s*(?:£|GBP|€|\$)?\s*([0-9][0-9,]*(?:\.\d{2})?)/i,
+      /(?:£|GBP|€|\$)\s*([0-9][0-9,]*(?:\.\d{2})?)/,
+      ...(amountMatch ? [/([0-9][0-9,]*(?:\.\d{2})?)/] : []),
+    ]);
+    const parsedPrice = bidMatch ? parseFloat(bidMatch[1].replace(/,/g, "")) : NaN;
+    // "High Bid: 0.00" means nobody has bid yet: treat as no price rather than 0.
+    const price = parsedPrice > 0 ? parsedPrice : null;
+
+    const auctioneerMatch = card.match(/class="[^"]*app-auction-lot-card__auctioneer[^"]*"[^>]*>([\s\S]*?)<\/a>/i);
+    const auctioneer = auctioneerMatch ? cleanHtmlText(decodeHtmlEntities(auctioneerMatch[1])) : "";
+
+    lots.push({ lotId, lotNumber, title, imageUrl, location, price, auctioneer });
+  }
+
+  return lots;
+}
+
+// Runs in the Camoufox page (via page.evaluate) and returns one raw record per lot card. Kept as
+// a string so the sidecar and the Chrome fallback share exactly the same extraction code.
+export const HIBID_EXTRACT_LOTS_SCRIPT = String.raw`(() => {
+  const seen = new Set();
+  const results = [];
+  const cards = Array.from(document.querySelectorAll("app-auction-lot-card, app-lot-tile, .lot-view, .lot-tile"));
+
+  for (const card of cards) {
+    const link = card.querySelector('a[href*="/lot/"]');
+    const href = link ? (link.href || link.getAttribute("href") || "") : "";
+    const idMatch = href.match(/\/lot\/(\d+)/);
+    if (!idMatch || seen.has(idMatch[1])) continue;
+    seen.add(idMatch[1]);
+
+    const text = (card.textContent || "").replace(/\s+/g, " ").trim();
+    const titleEl = card.querySelector(".app-auction-lot-card__title, .lot-title, h2, h3");
+    let title = titleEl ? (titleEl.textContent || "").replace(/\s+/g, " ").trim() : "";
+    if (!title && link) title = (link.getAttribute("aria-label") || "").trim();
+    if (!title) continue;
+
+    const numberEl = card.querySelector(".app-auction-lot-card__lot-number, .text-primary");
+    const numberText = numberEl ? (numberEl.textContent || "").replace(/\s+/g, " ").trim() : "";
+    const numberMatch = numberText.match(/Lot\s*([A-Za-z0-9-]+)/i) || text.match(/Lot\s+([A-Za-z0-9-]+)/i);
+    const lotNumber = numberMatch ? numberMatch[1] : numberText.replace(/^Lot\s*/i, "");
+
+    const img = card.querySelector("img");
+    const imageUrl = img ? (img.getAttribute("src") || img.getAttribute("data-src") || "") : "";
+
+    const locationEl = card.querySelector(".search-radius-lot, app-search-radius [aria-label]");
+    let location = locationEl ? (locationEl.getAttribute("aria-label") || "").trim() : "";
+    if (!location) {
+      const locationMatch = text.match(/([A-Z][a-zA-Z .'-]+,\s*[A-Z]{2}(?:\s+\d{5})?)/);
+      if (locationMatch) location = locationMatch[1];
+    }
+    if (location && !/usa|united states/i.test(location)) location += ", USA";
+
+    const amountEl = card.querySelector(".app-auction-lot-card__amount");
+    const priceText = amountEl ? (amountEl.textContent || "") : text;
+    const bidMatch = priceText.match(/(?:Current Bid|Opening Bid|High Bid|Bid):?\s*(?:£|GBP|€|\$)?\s*([0-9][0-9,]*(?:\.\d{2})?)/i)
+      || priceText.match(/(?:£|GBP|€|\$)\s*([0-9][0-9,]*(?:\.\d{2})?)/)
+      || (amountEl ? priceText.match(/([0-9][0-9,]*(?:\.\d{2})?)/) : null);
+    const parsedPrice = bidMatch ? parseFloat(bidMatch[1].replace(/,/g, "")) : NaN;
+    const price = parsedPrice > 0 ? parsedPrice : null;
+
+    const auctioneerEl = card.querySelector(".app-auction-lot-card__auctioneer");
+    const auctioneer = auctioneerEl ? (auctioneerEl.textContent || "").replace(/\s+/g, " ").trim() : "";
+
+    results.push({ lotId: idMatch[1], lotNumber, title, imageUrl, location, price, auctioneer });
+  }
+  return results;
+})()`;
+
 // Fast scrape of upcoming auctions & featured lots from svdisposition.com
 export async function scrapeSvdUpcomingAuctions(keyword?: string, cancelSignal?: AbortSignal): Promise<any[]> {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-    const res = await fetch("https://svdisposition.com/upcoming-auctions", {
+    const res = await httpFetch("https://svdisposition.com/upcoming-auctions", {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Connection": "close"
-      },
-      signal: withCancel(controller.signal, cancelSignal)
-    });
-    clearTimeout(timeoutId);
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9"
+      }
+    }, cancelSignal, 15000);
     if (!res.ok) {
       noteResponse(res, "SVD auctions");
       return [];
@@ -40,7 +193,7 @@ export async function scrapeSvdUpcomingAuctions(keyword?: string, cancelSignal?:
       seenIds.add(auctionId);
 
       const rawText = match[3].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      
+
       // Filter if keyword requested
       if (kwLower && !rawText.toLowerCase().includes(kwLower)) {
         continue;
@@ -49,7 +202,7 @@ export async function scrapeSvdUpcomingAuctions(keyword?: string, cancelSignal?:
       // Parse date: e.g. "Sep 8–10, 2026" or "Sep 15–17, 2026"
       const dateMatch = rawText.match(/([A-Za-z]{3,9}\s+\d+(?:–\d+)?,\s*\d{4})/);
       const dateStr = dateMatch ? dateMatch[1] : "";
-      
+
       // Parse location: e.g. "| Multiple Locations" or "| Santa Clara, CA"
       const locMatch = rawText.match(/\|\s*([^F]+?)(?:Featuring|View)/i);
       let location = locMatch ? locMatch[1].trim() : "Silicon Valley, CA, USA";
@@ -117,17 +270,12 @@ export async function fetchHibidLotDetail(lotId: string, cancelSignal?: AbortSig
 
   try {
     const targetUrl = `https://hibid.com/lot/${cleanId}`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000); // 4s timeout for single lot
-    const res = await fetch(targetUrl, {
+    const res = await httpFetch(targetUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9"
-      },
-      signal: withCancel(controller.signal, cancelSignal)
-    });
-    clearTimeout(timeoutId);
+      }
+    }, cancelSignal, 4000); // 4s timeout for single lot
     if (!res.ok) {
       noteResponse(res, "HiBid lot details");
       return null;
@@ -137,24 +285,40 @@ export async function fetchHibidLotDetail(lotId: string, cancelSignal?: AbortSig
 
     const companyMatch = html.match(/class="lot-company-page-link"[^>]*>([^<]+)<\/a>/i) ||
                          html.match(/class="[^"]*company-name[^"]*"[^>]*>([^<]+)<\//i);
-    const company = companyMatch ? companyMatch[1].replace(/&amp;/g, "&").trim() : null;
+    const company = companyMatch ? decodeHtmlEntities(companyMatch[1]).trim() : null;
 
     const datesMatch = html.match(/class="lot-auction-date-range[^"]*"[^>]*>([^<]+)<\/div>/i);
     const dateRange = datesMatch ? datesMatch[1].trim() : null;
 
     const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-    let title = titleMatch ? titleMatch[1].replace(/&amp;/g, "&").trim() : "";
+    let title = titleMatch ? decodeHtmlEntities(titleMatch[1]).trim() : "";
     title = title.replace(/\s*\|\s*Live and Online Auctions on HiBid\.com/i, "").trim();
 
     const imgMatch = html.match(/<meta\s+(?:property|name)="og:image"\s+content="([^"]*)"/i);
-    const imageUrl = imgMatch ? imgMatch[1].replace(/&amp;/g, "&") : null;
+    const imageUrl = imgMatch ? decodeHtmlEntities(imgMatch[1]) : null;
 
-    const locMatch = html.match(/class="[^"]*location[^"]*"[^>]*>([^<]+)<\//i) ||
-                     html.match(/([A-Z][a-zA-Z\s.-]+,\s*[A-Z]{2}\s*\d{5})/);
-    const address = locMatch ? locMatch[1].trim() : null;
+    // The detail page links its location to Google Maps, which is more reliable than scraping a
+    // class name (the old regex could match unrelated "location" text).
+    const mapsMatch = html.match(/https:\/\/maps\.google\.com\/maps\?q=([^"]+)/i);
+    let address: string | null = null;
+    if (mapsMatch) {
+      try {
+        address = cleanHtmlText(decodeHtmlEntities(decodeURIComponent(mapsMatch[1])));
+      } catch {
+        address = cleanHtmlText(decodeHtmlEntities(mapsMatch[1]));
+      }
+    }
+    if (!address) {
+      const cityMatch = html.match(/<app-city-state-zip-link[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i);
+      if (cityMatch) address = cleanHtmlText(cityMatch[1]);
+    }
+    if (!address) {
+      const locMatch = html.match(/([A-Z][a-zA-Z\s.-]+,\s*[A-Z]{2}\s*\d{5})/);
+      address = locMatch ? locMatch[1].trim() : null;
+    }
 
     const descMatch = html.match(/<meta\s+(?:property|name)="og:description"\s+content="([^"]*)"/i);
-    const description = descMatch ? descMatch[1].replace(/&amp;/g, "&").trim() : "";
+    const description = descMatch ? decodeHtmlEntities(descMatch[1]).trim() : "";
 
     const detail = {
       lotId: cleanId,
@@ -191,77 +355,75 @@ export async function scrapeHibidLots(keyword: string = "", closingDate: string 
   console.log(`[HiBid Global Scraper] Querying HiBid: ${targetUrl}`);
 
   let lotsRaw: any[] = [];
-  // Reported only if the Chrome fallback comes back empty too.
+  let path = "direct";
+  let challenged = false;
+  let sidecarTimedOut = false;
+  // Reported only if the fallbacks come back empty too.
   let directProblem: () => void = () => {};
+  let sidecarProblem: (() => void) | null = null;
 
-  // 1. First attempt: High-speed direct HTTP fetch with browser headers
+  // 1. First attempt: curl_cffi-backed direct HTTP fetch (server-rendered HTML, no JS needed).
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout for large multi-lot HTML
-    const res = await fetch(targetUrl, {
+    const res = await httpFetch(targetUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9"
-      },
-      signal: withCancel(controller.signal, cancelSignal)
-    });
-    clearTimeout(timeoutId);
-    if (!res.ok) directProblem = () => noteResponse(res, "HiBid search");
+      }
+    }, cancelSignal, 10000); // 10s timeout for large multi-lot HTML
 
     if (res.ok) {
       const html = await res.text();
-      const tiles = html.split("<app-lot-tile");
-      if (tiles.length > 1) {
-        for (let i = 1; i < tiles.length; i++) {
-          const t = tiles[i];
-          const idMatch = t.match(/id="lot-(\d+)"/) || t.match(/href="\/lot\/(\d+)/);
-          if (!idMatch) continue;
-          const lotId = idMatch[1];
-
-          const lotNumMatch = t.match(/<span[^>]*class="[^"]*text-primary[^"]*"[^>]*>Lot\s*([^<]+)<\/span>/i) ||
-                              t.match(/Lot\s+(\d+[A-Za-z0-9-]*)/i);
-          const lotNumber = lotNumMatch ? lotNumMatch[1].trim() : "";
-
-          const titleMatch = t.match(/<h2[^>]*class="[^"]*lot-title[^"]*"[^>]*>([\s\S]*?)<\/h2>/i) ||
-                             t.match(/aria-label="([^"]+)"/);
-          const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim() : `Lot ${lotNumber || lotId}`;
-
-          const imgMatch = t.match(/src="([^"]+cdn\.hibid\.com\/img\.axd[^"]+)"/i) ||
-                           t.match(/<img[^>]*class="[^"]*lot-thumbnail[^"]*"[^>]*src="([^"]+)"/i);
-          const imageUrl = imgMatch ? imgMatch[1].replace(/&amp;/g, "&") : "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&q=80";
-
-          const locMatch = t.match(/class="[^"]*search-radius-lot[^"]*"[^>]*aria-label="([^"]+)"/i) ||
-                           t.match(/aria-label="([A-Z][a-zA-Z\s.-]+,\s*[A-Z]{2}[^"]*)"/i);
-          let location = locMatch ? locMatch[1].trim() : "United States";
-          if (location && !location.toLowerCase().includes("usa") && !location.toLowerCase().includes("united states")) {
-            location += ", USA";
-          }
-
-          const bidMatch = t.match(/(?:Current Bid|Opening Bid|High Bid|Bid):?\s*(?:£|GBP|€|\$)?\s*([0-9,]+(?:\.\d{2})?)/i) ||
-                           t.match(/(?:£|GBP|€|\$)\s*([0-9,]+(?:\.\d{2})?)/);
-          // "High Bid: 0.00" means nobody has bid yet: treat as no price rather than 0.
-          const parsedPrice = bidMatch ? parseFloat(bidMatch[1].replace(/,/g, "")) : NaN;
-          const price = parsedPrice > 0 ? parsedPrice : null;
-
-          lotsRaw.push({
-            lotId,
-            lotNumber,
-            title,
-            imageUrl,
-            location,
-            price
-          });
+      const pageTitle = html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] ?? "";
+      if (noteChallengeTitle(decodeHtmlEntities(pageTitle), "HiBid search")) {
+        challenged = true;
+      } else {
+        lotsRaw = parseHibidSearchHtml(html);
+        if (lotsRaw.length === 0) {
+          // A 200 page with no cards is the same trap that hid this path for months. Make it loud.
+          console.warn("[HiBid Global Scraper] Direct fetch returned no lot cards; falling back to a browser");
         }
       }
+    } else {
+      directProblem = () => noteResponse(res, "HiBid search");
     }
   } catch (directErr: any) {
     console.warn("[HiBid Global Scraper] Direct fetch failed or timed out:", directErr.message);
     directProblem = () => noteFailure(directErr, "HiBid search", cancelSignal);
   }
 
-  // 2. Fallback to Puppeteer if direct fetch didn't capture lots (not if the search was cancelled)
-  if (lotsRaw.length === 0 && !cancelSignal?.aborted) {
+  // 2. Fallback: Camoufox sidecar when configured, then Chrome. Neither runs after cancellation.
+  if (lotsRaw.length === 0 && !cancelSignal?.aborted && !challenged && isSidecarEnabled()) {
+    try {
+      console.log(`[HiBid Global Scraper] Camoufox fallback for ${targetUrl}`);
+      const { result, title, error } = await scrapePage({
+        url: targetUrl,
+        gotoTimeoutMs: 25000,
+        waitSelector: 'a[href*="/lot/"]',
+        waitSelectorTimeoutMs: 8000,
+        evaluateScript: HIBID_EXTRACT_LOTS_SCRIPT,
+        attempts: 1,
+      }, cancelSignal, 28000); // under the outer 30s HiBid budget
+
+      if (!cancelSignal?.aborted) {
+        if (noteChallengeTitle(title, "HiBid search page (Camoufox)")) {
+          challenged = true;
+        } else if (error) {
+          throw new Error(error);
+        } else if (Array.isArray(result)) {
+          lotsRaw = result;
+          path = "sidecar";
+        }
+      }
+    } catch (sidecarErr: any) {
+      console.warn("[HiBid Global Scraper] Sidecar fallback error:", sidecarErr.message);
+      sidecarProblem = () => noteFailure(sidecarErr, "HiBid search page (Camoufox)", cancelSignal);
+      // The outer search budget is 30s and the sidecar just used most of it; Chrome would only
+      // repeat the wait.
+      if (/timed? ?out|timeout/i.test(String(sidecarErr?.message ?? ""))) sidecarTimedOut = true;
+    }
+  }
+
+  if (lotsRaw.length === 0 && !cancelSignal?.aborted && !challenged && !sidecarTimedOut) {
     let browser = null;
     let stopClosingOnCancel = () => {};
     try {
@@ -277,46 +439,11 @@ export async function scrapeHibidLots(keyword: string = "", closingDate: string 
       if (await noteChallengePage(page, "HiBid search page (Chrome)")) throw new Error("bot check page");
       await page.waitForSelector("a[href*=\"/lot/\"]", { timeout: 8000 }).catch(() => {});
 
-      lotsRaw = await page.evaluate(() => {
-        const lotLinks = Array.from(document.querySelectorAll("a[href*=\"/lot/\"]"));
-        const seen = new Set<string>();
-        const results: any[] = [];
-
-        for (const a of lotLinks) {
-          const href = (a as HTMLAnchorElement).href;
-          if (!href || seen.has(href)) continue;
-          seen.add(href);
-
-          const tile = a.closest("app-lot-tile") || a.closest(".lot-view") || a.parentElement?.parentElement;
-          const text = tile ? tile.textContent?.replace(/\s+/g, " ").trim() || "" : a.textContent?.trim() || "";
-          const img = tile ? tile.querySelector("img") : null;
-          const imgSrc = img ? (img.getAttribute("src") || img.getAttribute("data-src") || "") : "";
-
-          const title = a.getAttribute("aria-label") || a.textContent?.trim() || "";
-          if (!title || title.includes("T/CS, PAYMENT") || title.includes("TRY SAM, OUR")) continue;
-
-          const lotMatch = text.match(/Lot\s+([A-Za-z0-9]+)/i);
-          const lotNumber = lotMatch ? lotMatch[1] : "";
-
-          const bidMatch = text.match(/(?:Current Bid|Opening Bid|High Bid|Bid):?\s*(?:£|GBP|€|\$)?\s*([0-9,]+(?:\.\d{2})?)/i) || text.match(/(?:£|GBP|€|\$)\s*([0-9,]+(?:\.\d{2})?)/);
-          // "High Bid: 0.00" means nobody has bid yet: treat as no price rather than 0.
-          const parsedPrice = bidMatch ? parseFloat(bidMatch[1].replace(/,/g, "")) : NaN;
-          const price = parsedPrice > 0 ? parsedPrice : null;
-
-          const idMatch = href.match(/\/lot\/(\d+)/);
-          const lotId = idMatch ? idMatch[1] : (lotNumber || Math.random().toString(36).substring(2, 8));
-
-          results.push({
-            lotId,
-            lotNumber,
-            title,
-            imageUrl: imgSrc,
-            location: "United States",
-            price
-          });
-        }
-        return results;
-      });
+      const extracted = await page.evaluate(HIBID_EXTRACT_LOTS_SCRIPT);
+      if (Array.isArray(extracted)) {
+        lotsRaw = extracted;
+        path = "puppeteer";
+      }
     } catch (pupErr: any) {
       console.warn("[HiBid Global Scraper] Puppeteer fallback error:", pupErr.message);
       if (pupErr.message !== "bot check page") noteFailure(pupErr, "HiBid search page (Chrome)", cancelSignal);
@@ -328,13 +455,16 @@ export async function scrapeHibidLots(keyword: string = "", closingDate: string 
     }
   }
 
-  if (lotsRaw.length === 0) directProblem();
+  if (lotsRaw.length === 0) {
+    sidecarProblem?.();
+    directProblem();
+  }
 
   // Map into normalized AuctionListing items
   const parsedListings = lotsRaw.map((l: any) => {
     const coords = getCoordinatesForLocation(l.location, "US");
     const category = inferCategoryFromTitle(l.title, l.title);
-    
+
     // Compute default ending date: if closingDate passed use that, otherwise 14 days out
     let endingDate = new Date(Date.now() + 14 * 86400000).toISOString();
     if (cleanClosing) {
@@ -357,13 +487,15 @@ export async function scrapeHibidLots(keyword: string = "", closingDate: string 
       address: l.location,
       latitude: coords.latitude,
       longitude: coords.longitude,
-      auctioneer: "HiBid Auctions",
+      auctioneer: l.auctioneer || "HiBid Auctions",
       category,
       status: "Active",
       country: "US",
       currency: "$",
       currentPrice: l.price,
-      startPrice: l.price,
+      // The card publishes the current/high bid only; HiBid does not say what bidding opened at.
+      startPrice: null,
+      bidLabel: l.price != null ? "Current Bid" : undefined,
       sourcePlatform: "HiBid"
     };
   });
@@ -402,14 +534,16 @@ export async function scrapeHibidLots(keyword: string = "", closingDate: string 
     await Promise.race([Promise.allSettled(enrichBatch), enrichTimeout]);
   }
 
-  console.log(`[HiBid Global Scraper] Extracted ${parsedListings.length} lots for query "${logKey}"`);
+  // One line that says which branch actually produced the results. Two separate bugs (Cloudflare
+  // block + stale selector) hid behind the old fallback because nothing reported this.
+  console.log(`[HiBid Global Scraper] path=${path} count=${parsedListings.length} query="${logKey}"`);
   return parsedListings;
 }
 
 const HIBID_SEARCH_TIMEOUT_MS = 30000;
 
 // Timeout wrapper ensuring HiBid search never blocks for more than 30 seconds. On timeout the
-// search is also cancelled, so its requests and any Chrome fallback stop instead of running on.
+// search is also cancelled, so its requests and any browser fallback stop instead of running on.
 export async function scrapeHibidLotsWithTimeout(keyword: string = "", closingDate: string = "", cancelSignal?: AbortSignal): Promise<any[]> {
   const timeout = new AbortController();
   const signal = withCancel(timeout.signal, cancelSignal);

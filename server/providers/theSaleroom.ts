@@ -1,5 +1,5 @@
 import { scrapeAtgPlatformLots } from "./atg";
-import { withCancel } from "../lib/cancel";
+import { httpFetch } from "../lib/http";
 import { noteFailure, noteResponse } from "../lib/sourceHealth";
 
 // High-performance search for The Saleroom via Algolia InstantSearch API with Puppeteer fallback
@@ -22,22 +22,15 @@ export async function scrapeTheSaleroomLots(keyword: string, cancelSignal?: Abor
       }).toString()
     };
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-    const res = await fetch(url, {
+    const res = await httpFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Algolia-Application-Id': appId,
-        'X-Algolia-API-Key': apiKey,
-        'Connection': 'close',
-        'User-Agent': 'Mozilla/5.0'
+        'X-Algolia-API-Key': apiKey
       },
-      body: JSON.stringify(body),
-      signal: withCancel(controller.signal, cancelSignal)
-    });
-    clearTimeout(timeoutId);
+      body: JSON.stringify(body)
+    }, cancelSignal, 15000);
     if (!res.ok) {
       algoliaProblem = () => noteResponse(res, "search");
       throw new Error(`Algolia query status: ${res.status}`);

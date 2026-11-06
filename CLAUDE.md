@@ -6,6 +6,7 @@ Auction aggregator: an Express server scrapes UK/US auction sites and streams re
 ## Commands
 
 - `npm run dev`: dev server with Vite (port from `PORT`, default 3000)
+- `npm run sidecar`: Python sidecar on port 8877 (Camoufox + curl_cffi); optional in dev
 - `npm run lint`: type check (`tsc --noEmit`)
 - `npm test`: unit and fixture tests; offline, no browser needed
 - `npm run test:rules`: Firestore security rules tests in the emulator (needs Java)
@@ -22,8 +23,9 @@ Before finishing any change: `npm run lint && npm test`. If you touched `firesto
 - `server/app.ts`: `createApp()`, middleware and rate limits
 - `server/routes/`: `auctions.ts` (starter lots, SSE search stream), `imageProxy.ts`
 - `server/providers/`: one file per auction source
-- `server/lib/`: shared helpers (`categories`, `geo`, `prices`, `text`, `cancel`, `dates`, `http2`,
-  `sourceHealth`)
+- `server/lib/`: shared helpers (`categories`, `geo`, `prices`, `text`, `cancel`, `dates`, `http`,
+  `sidecar`, `sourceHealth`)
+- `sidecar/`: Python FastAPI process: `/scrape` (Camoufox) and `/fetch` (curl_cffi)
 - `server/searchCache.ts`: per-query result cache; `server/safeFetch.ts`: SSRF-safe fetch
 - `src/`: React app; pure display logic lives in `src/utils/` so it can be tested
 - `tests/fixtures/providers/`: real responses recorded from each site
@@ -40,15 +42,17 @@ Data honesty
 - Lot ids must be stable across searches (derived from the site's own lot id or URL, never the time).
 
 Scrapers
-- Every provider takes an optional `cancelSignal` and must honour it: pass it to every `fetch` via
-  `withCancel`, skip Chrome fallbacks once aborted, and close browsers with `closeBrowserOnCancel`.
+- Every provider takes an optional `cancelSignal` and must honour it: pass it to every request via
+  `httpFetch`/`scrapePage` (both accept it), skip browser fallbacks once aborted, and close browsers
+  with `closeBrowserOnCancel`.
 - Every network call needs a timeout. Providers return `[]` on failure rather than throwing.
+- Plain HTTP goes through `lib/http.ts` (`httpFetch`), which uses the sidecar's curl_cffi transport
+  when configured and Node `fetch` otherwise. JavaScript pages go through `lib/sidecar.ts`
+  (`scrapePage`, Camoufox) with Chrome as the fallback. Don't call `fetch()` directly in a provider.
 - When a call is blocked, times out or fails, also note it with `lib/sourceHealth.ts` (`noteResponse`,
-  `noteFailure`, `noteChallengePage`) so the search shows why a source came back empty. If a fallback
-  then succeeds, don't report the first attempt.
+  `noteFailure`, `noteChallengePage`/`noteChallengeTitle`) so the search shows why a source came back
+  empty. If a fallback then succeeds, don't report the first attempt.
 - Don't add a provider-level cache; results are cached in `SearchCache` in the routes.
-- Easy Live's bid endpoint answers HTTP/1.1 (Node's `fetch`) with a Cloudflare challenge but serves
-  HTTP/2, so bid lookups fall back to `lib/http2.ts` when they see `cf-mitigated: challenge`.
 - Classification and location matching use whole words (see `lib/categories.ts`, `lib/geo.ts`),
   never `includes()` on substrings.
 
