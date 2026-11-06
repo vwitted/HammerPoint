@@ -16,6 +16,8 @@ export interface HttpFetchInit {
   // curl_cffi profile, e.g. "chrome124". Defaults to the newest Chrome the pinned sidecar knows.
   impersonate?: string;
   timeoutMs?: number;
+  // Named proxy profile in the sidecar's PROXIES map.
+  proxyProfile?: string;
 }
 
 // Headers curl_cffi owns. Passing these through is worse than omitting them: a Chrome UA over a
@@ -70,6 +72,7 @@ export async function httpFetch(
       body: init.body,
       impersonate: init.impersonate,
       timeoutMs: effectiveTimeout,
+      proxyProfile: init.proxyProfile,
     }, cancelSignal, effectiveTimeout);
 
     if (res.error) throw new Error(`sidecar fetch failed: ${res.error}`);

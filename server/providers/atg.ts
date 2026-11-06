@@ -5,8 +5,11 @@ import { isSidecarEnabled, scrapePage } from "../lib/sidecar";
 import { noteChallengePage, noteChallengeTitle, noteFailure, reportSourceIssue } from "../lib/sourceHealth";
 
 // Dedicated BidSpotter UK scraper via Puppeteer
+// The only provider that runs through a mobile proxy for now (see sidecar/main.py PROXIES).
+const BIDSPOTTER_PROXY_PROFILE = "mobile";
+
 export async function scrapeBidspotterLots(keyword: string, cancelSignal?: AbortSignal): Promise<any[]> {
-  return await scrapeAtgPlatformLots('https://www.bidspotter.co.uk', 'BidSpotter', 'bidspotter', keyword, cancelSignal);
+  return await scrapeAtgPlatformLots('https://www.bidspotter.co.uk', 'BidSpotter', 'bidspotter', keyword, cancelSignal, BIDSPOTTER_PROXY_PROFILE);
 }
 
 // Runs inside the search results page (via page.evaluate) and extracts one raw record per lot card.
@@ -165,6 +168,7 @@ async function scrapeAtgViaSidecar(
   siteName: string,
   idPrefix: string,
   cancelSignal?: AbortSignal,
+  proxyProfile?: string,
 ): Promise<AtgSidecarAttempt> {
   try {
     const { result, title, status, error } = await scrapePage({
@@ -178,6 +182,8 @@ async function scrapeAtgViaSidecar(
       // One attempt fits the 60s budget. Camoufox's cold start plus a WAF challenge can take ~40s
       // on a shared host; a second attempt would be cut off before it could finish.
       attempts: 1,
+      proxyProfile,
+      blockImages: true,
     }, cancelSignal, ATG_SCRAPE_TIMEOUT_MS);
 
     if (cancelSignal?.aborted) return { lots: [], problem: null };
@@ -323,7 +329,7 @@ async function scrapeAtgViaChrome(
 }
 
 // Robust ATG Network browser scraper (used for BidSpotter and as fallback for The Saleroom)
-export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, idPrefix: string, keyword: string, cancelSignal?: AbortSignal): Promise<any[]> {
+export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, idPrefix: string, keyword: string, cancelSignal?: AbortSignal, proxyProfile?: string): Promise<any[]> {
   if (cancelSignal?.aborted) return [];
 
   const searchUrl = `${baseUrl}/en-gb/search-results?searchTerm=${encodeURIComponent(keyword)}`;
@@ -333,7 +339,7 @@ export async function scrapeAtgPlatformLots(baseUrl: string, siteName: string, i
   // working without Python.
   let sidecarProblem: (() => void) | null = null;
   if (isSidecarEnabled()) {
-    const attempt = await scrapeAtgViaSidecar(searchUrl, siteName, idPrefix, cancelSignal);
+    const attempt = await scrapeAtgViaSidecar(searchUrl, siteName, idPrefix, cancelSignal, proxyProfile);
     if (attempt.lots !== null) return attempt.lots;
     sidecarProblem = attempt.problem;
     if (cancelSignal?.aborted) return [];

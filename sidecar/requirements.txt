@@ -3,4 +3,5 @@
 fastapi==0.162.0
 uvicorn[standard]==0.54.0
 curl_cffi==0.17.0
-camoufox==0.5.9
+# The [geoip] extra lets Camoufox align timezone/locale/WebRTC with the proxy exit IP.
+camoufox[geoip]==0.5.9

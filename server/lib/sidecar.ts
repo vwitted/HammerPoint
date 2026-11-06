@@ -14,6 +14,10 @@ export interface ScrapeOptions {
   settleMs?: number;
   evaluateScript?: string;
   attempts?: number;
+  // Named proxy profile in the sidecar's PROXIES map (SIDECAR_PROXIES or proxyList.txt).
+  proxyProfile?: string;
+  // Skip image/binary downloads in the browser; the extraction scripts read src attributes.
+  blockImages?: boolean;
 }
 
 export interface ScrapeResult {
@@ -95,6 +99,8 @@ export async function scrapePage(options: ScrapeOptions, cancelSignal?: AbortSig
     settle_ms: options.settleMs ?? 0,
     evaluate_script: options.evaluateScript ?? null,
     attempts: options.attempts ?? 1,
+    proxy_profile: options.proxyProfile ?? null,
+    block_images: options.blockImages ?? true,
   }, cancelSignal, timeoutMs);
   return {
     result: res.result ?? null,
@@ -108,7 +114,7 @@ export async function scrapePage(options: ScrapeOptions, cancelSignal?: AbortSig
 // A plain request with curl_cffi's browser TLS/HTTP2 fingerprint.
 export async function sidecarFetch(
   url: string,
-  init: { method?: string; headers?: Record<string, string>; body?: string; impersonate?: string; timeoutMs?: number },
+  init: { method?: string; headers?: Record<string, string>; body?: string; impersonate?: string; timeoutMs?: number; proxyProfile?: string },
   cancelSignal?: AbortSignal,
   timeoutMs = 20_000,
 ): Promise<SidecarFetchResult> {
@@ -120,6 +126,7 @@ export async function sidecarFetch(
     body: init.body ?? null,
     impersonate: init.impersonate ?? "chrome",
     timeout_ms: effectiveTimeout,
+    proxy_profile: init.proxyProfile ?? null,
   }, cancelSignal, effectiveTimeout + 2_000);
   return {
     status: typeof res.status === "number" ? res.status : 0,

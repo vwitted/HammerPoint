@@ -50,6 +50,27 @@ browser providers on their existing fallbacks.
 The sidecar's own environment is optional: `SIDECAR_URL` points at an external sidecar, and
 `SIDECAR_PYTHON` overrides the interpreter the image starts. Leave both unset in the image.
 
+## Proxies
+
+The sidecar keeps proxy credentials and picks a profile by name; the Node providers never see them.
+
+- **Locally** (and on Render's native runtime, where the repo dir is present): the sidecar reads
+  `proxyList.txt` / `proxylist.txt` lines in the form `username:password@server:port` and names the
+  first unique endpoint `mobile`. The file is gitignored.
+- **Docker / hosted env vars**: set `SIDECAR_PROXIES` to JSON, e.g.
+  `SIDECAR_PROXIES={"mobile":{"server":"http://host:port","username":"user","password":"pass"}}`.
+
+Only **BidSpotter** requests a proxy today (`proxy_profile: "mobile"` in `atg.ts`). The Camoufox
+session is launched with the proxy plus `geoip=True` (aligns timezone/locale/WebRTC to the exit IP)
+and `block_images=True` (the extraction script reads `src`/`data-src` attributes, so image bytes are
+never downloaded through the proxy). Client-facing images use `/api/proxy/image` (a direct
+`fetchPublicUrl`), so they never touch the proxy either.
+
+`/fetch` requests go through curl_cffi, which negotiates `Accept-Encoding: gzip, deflate, br` and
+decompresses the body; the sidecar strips caller `User-Agent`/`Accept-Encoding`/`sec-ch-ua*` so the
+compression and fingerprint stay consistent with the impersonated profile. The Firefox session
+negotiates compression the same way natively.
+
 Firebase config is in `firebase-applet-config.json` and is built in; nothing to set.
 
 **Memory:** give the container at least **3 GB**. A search can run Camoufox (Firefox) and Chrome

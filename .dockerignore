@@ -17,3 +17,5 @@ docs
 .sidecar-cache
 __pycache__
 *.pyc
+proxyList.txt
+proxylist.txt
