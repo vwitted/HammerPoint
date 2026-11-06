@@ -9,6 +9,25 @@ import { DEFAULT_SIDECAR_URL, sidecarUrl, waitForSidecar } from "./sidecar";
 
 let child: ChildProcess | null = null;
 
+// Exposed through GET /api/health so a deployment can be checked without the platform's logs.
+const managedStatus: { started: boolean; ready: boolean; error: string | null } = {
+  started: false,
+  ready: false,
+  error: null,
+};
+
+export function getManagedSidecarStatus() {
+  return { ...managedStatus, autostart: process.env.SIDECAR_AUTOSTART === "1" };
+}
+
+function disableManagedSidecar(why: string): void {
+  if (process.env.SIDECAR_URL?.trim()) return;
+  process.env.SIDECAR_AUTOSTART = "0";
+  managedStatus.ready = false;
+  managedStatus.error = why;
+  console.warn(`[SIDECAR] ${why}; providers will use fallbacks`);
+}
+
 function sidecarPort(): string {
   try {
     return new URL(DEFAULT_SIDECAR_URL).port || "8877";
@@ -17,20 +36,13 @@ function sidecarPort(): string {
   }
 }
 
-// Called when the managed process is gone. Disabling autostart makes isSidecarEnabled() false, so
-// the next provider does not wait for a connection that will never come.
-function disableManagedSidecar(why: string): void {
-  if (process.env.SIDECAR_URL?.trim()) return;
-  process.env.SIDECAR_AUTOSTART = "0";
-  console.warn(`[SIDECAR] ${why}; providers will use fallbacks`);
-}
-
 export async function startManagedSidecar(): Promise<void> {
   if (process.env.SIDECAR_AUTOSTART !== "1") return;
   if (process.env.SIDECAR_URL?.trim()) {
     // An explicitly configured URL wins; don't start a second copy.
     return;
   }
+  managedStatus.started = true;
 
   const python = process.env.SIDECAR_PYTHON || "/app/.venv/bin/python";
   const port = sidecarPort();
@@ -56,6 +68,7 @@ export async function startManagedSidecar(): Promise<void> {
     processHandle.once("error", (err) => {
       console.warn(`[SIDECAR] failed to start: ${err.message}`);
       child = null;
+      managedStatus.error = err.message;
       resolve(false);
     });
     processHandle.once("exit", (code, signal) => {
@@ -68,6 +81,8 @@ export async function startManagedSidecar(): Promise<void> {
 
   const ready = await Promise.race([waitForSidecar(30_000), exited]);
   if (ready) {
+    managedStatus.ready = true;
+    managedStatus.error = null;
     console.log(`[SIDECAR] ready at ${sidecarUrl()}`);
   } else {
     disableManagedSidecar("not available");
